@@ -1,0 +1,282 @@
+"""
+Module 5: Results Analyzer & Visualizer
+=========================================
+Decodes the raw bitstring measurement histogram into a human-readable
+optimization result and produces visualisation artifacts.
+
+Responsibilities:
+  - Rank bitstrings by probability and decode them to asset selections
+  - Check each candidate against the problem's hard constraints
+  - Compute the approximation ratio vs. a classical brute-force optimum
+  - Generate two matplotlib figures:
+      1. Bitstring probability histogram (top-10 outcomes)
+      2. COBYLA convergence curve (energy vs. iteration)
+"""
+
+from __future__ import annotations
+
+import logging
+from typing import Any
+
+import matplotlib
+matplotlib.use("Agg")  # Non-interactive backend for Streamlit compatibility
+import matplotlib.pyplot as plt
+import numpy as np
+
+from agents.states import AgentState, ParsedProblem
+
+logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Classical brute-force (small problems only, n ≤ 20)
+# ---------------------------------------------------------------------------
+
+def _brute_force_optimum(problem: ParsedProblem) -> tuple[float, list[str]]:
+    """
+    Evaluate all 2^n binary assignments and return the best objective value
+    and the corresponding selected assets.
+
+    Used to compute the approximation ratio.
+    """
+    assets = problem.get("assets", [])
+    weights = problem.get("objective_weights", {a: 1.0 for a in assets})
+    objective = problem.get("objective", "maximize")
+    num_select = problem.get("num_select", 0)
+    hard_constraints = problem.get("hard_constraints", [])
+    n = len(assets)
+
+    if n > 20:
+        # Too large for brute force; return None sentinel
+        return float("-inf") if objective == "maximize" else float("inf"), []
+
+    best_val = float("-inf") if objective == "maximize" else float("inf")
+    best_selection: list[str] = []
+
+    for mask in range(1 << n):
+        selection = [assets[i] for i in range(n) if (mask >> i) & 1]
+
+        # Check cardinality constraint
+        if num_select > 0 and len(selection) != num_select:
+            continue
+
+        # Check other hard constraints
+        satisfied = True
+        for constraint in hard_constraints:
+            ctype = constraint.get("type", "")
+            if ctype == "budget":
+                cost_weights = constraint.get("weights", {})
+                limit = constraint.get("limit", float("inf"))
+                total_cost = sum(cost_weights.get(a, 1.0) for a in selection)
+                if total_cost > limit:
+                    satisfied = False
+                    break
+
+        if not satisfied:
+            continue
+
+        obj_val = sum(weights.get(a, 1.0) for a in selection)
+        if objective == "maximize" and obj_val > best_val:
+            best_val = obj_val
+            best_selection = selection
+        elif objective == "minimize" and obj_val < best_val:
+            best_val = obj_val
+            best_selection = selection
+
+    return best_val, best_selection
+
+
+# ---------------------------------------------------------------------------
+# Constraint checker
+# ---------------------------------------------------------------------------
+
+def _check_constraints(selection: list[str], problem: ParsedProblem) -> bool:
+    """Return True if the selection satisfies all hard constraints."""
+    num_select = problem.get("num_select", 0)
+    hard_constraints = problem.get("hard_constraints", [])
+
+    if num_select > 0 and len(selection) != num_select:
+        return False
+
+    for constraint in hard_constraints:
+        ctype = constraint.get("type", "")
+        if ctype == "budget":
+            cost_weights = constraint.get("weights", {})
+            limit = constraint.get("limit", float("inf"))
+            if sum(cost_weights.get(a, 1.0) for a in selection) > limit:
+                return False
+
+    return True
+
+
+# ---------------------------------------------------------------------------
+# Decode bitstrings
+# ---------------------------------------------------------------------------
+
+def _decode_bitstring(bitstring: str, assets: list[str]) -> list[str]:
+    """
+    Map a bitstring (e.g. '10110') to selected asset names.
+    Qiskit's convention: rightmost bit = first qubit (x_0).
+    """
+    n = len(assets)
+    # Pad or truncate bitstring to match asset count
+    bits = bitstring.zfill(n)[-n:]
+    # Reverse because Qiskit stores q_0 at the rightmost position
+    return [assets[i] for i in range(n) if bits[-(i + 1)] == "1"]
+
+
+# ---------------------------------------------------------------------------
+# Visualisations
+# ---------------------------------------------------------------------------
+
+def _plot_histogram(counts: dict[str, int], top_n: int = 10) -> plt.Figure:
+    """Bar chart of the top-N most probable bitstrings."""
+    if not counts:
+        fig, ax = plt.subplots(figsize=(10, 4))
+        ax.set_title("No measurement data available")
+        return fig
+
+    sorted_counts = sorted(counts.items(), key=lambda x: x[1], reverse=True)[:top_n]
+    labels = [item[0] for item in sorted_counts]
+    values = [item[1] for item in sorted_counts]
+    total = sum(counts.values())
+    probabilities = [v / total for v in values]
+
+    fig, ax = plt.subplots(figsize=(10, 4))
+    bars = ax.bar(labels, probabilities, color="#4C72B0", edgecolor="white")
+    ax.set_xlabel("Bitstring (measurement outcome)", fontsize=11)
+    ax.set_ylabel("Probability", fontsize=11)
+    ax.set_title("QAOA Measurement Distribution (Top States)", fontsize=13)
+    ax.set_ylim(0, max(probabilities) * 1.2 if probabilities else 1.0)
+    plt.xticks(rotation=45, ha="right")
+
+    # Annotate bars
+    for bar, prob in zip(bars, probabilities):
+        ax.text(
+            bar.get_x() + bar.get_width() / 2,
+            bar.get_height() + 0.005,
+            f"{prob:.3f}",
+            ha="center", va="bottom", fontsize=9,
+        )
+
+    plt.tight_layout()
+    return fig
+
+
+def _plot_convergence(convergence_history: list[float]) -> plt.Figure:
+    """Line chart of the energy expectation value vs. COBYLA iteration."""
+    fig, ax = plt.subplots(figsize=(10, 4))
+    ax.plot(range(1, len(convergence_history) + 1), convergence_history,
+            color="#DD8452", linewidth=2, marker="o", markersize=3)
+    ax.set_xlabel("COBYLA Iteration", fontsize=11)
+    ax.set_ylabel("⟨H⟩ (Expectation Value)", fontsize=11)
+    ax.set_title("Classical-Quantum Hybrid Optimisation Convergence", fontsize=13)
+    ax.grid(alpha=0.3)
+    plt.tight_layout()
+    return fig
+
+
+# ---------------------------------------------------------------------------
+# Main node
+# ---------------------------------------------------------------------------
+
+def analyze(state: AgentState) -> AgentState:
+    """
+    LangGraph node: Module 5 — Results Analyzer & Visualizer.
+
+    Reads:   state['bitstring_counts'], state['parsed_problem'],
+             state['convergence_history'], state['optimal_energy']
+    Writes:  state['final_solution'], state['approximation_ratio'],
+             state['constraint_satisfied'], state['logs']
+    """
+    bitstring_counts: dict[str, int] = state.get("bitstring_counts", {})
+    parsed_problem: ParsedProblem = state.get("parsed_problem", {})
+    convergence_history: list[float] = state.get("convergence_history", [])
+    optimal_energy: float = state.get("optimal_energy", 0.0)
+    logs: list[str] = list(state.get("logs", []))
+
+    if not bitstring_counts:
+        return {**state, "error": "[results_analyzer] No bitstring counts found.", "logs": logs}
+
+    assets: list[str] = parsed_problem.get("assets", [])
+    objective_weights = parsed_problem.get("objective_weights", {a: 1.0 for a in assets})
+    objective_dir = parsed_problem.get("objective", "maximize")
+
+    # ── Decode and rank candidate solutions ───────────────────────────────
+    total_shots = sum(bitstring_counts.values())
+    candidates = []
+    for bitstring, count in sorted(bitstring_counts.items(), key=lambda x: x[1], reverse=True):
+        selection = _decode_bitstring(bitstring, assets)
+        obj_val = sum(objective_weights.get(a, 1.0) for a in selection)
+        satisfied = _check_constraints(selection, parsed_problem)
+        candidates.append({
+            "bitstring": bitstring,
+            "selection": selection,
+            "probability": count / total_shots,
+            "objective_value": obj_val,
+            "constraint_satisfied": satisfied,
+        })
+
+    # Best feasible solution (constraint-satisfying)
+    feasible = [c for c in candidates if c["constraint_satisfied"]]
+    if not feasible:
+        # Fall back to highest-probability solution
+        best_candidate = candidates[0]
+        logs.append("[results_analyzer] WARNING: No constraint-satisfying solution found.")
+    else:
+        best_candidate = max(feasible, key=lambda c: c["objective_value"]) \
+            if objective_dir == "maximize" \
+            else min(feasible, key=lambda c: c["objective_value"])
+
+    best_selection = best_candidate["selection"]
+    best_obj_val = best_candidate["objective_value"]
+    constraint_satisfied = best_candidate["constraint_satisfied"]
+
+    # ── Approximation ratio ───────────────────────────────────────────────
+    classical_optimum, classical_selection = _brute_force_optimum(parsed_problem)
+    if classical_optimum not in (float("inf"), float("-inf")) and classical_optimum != 0:
+        approximation_ratio = best_obj_val / classical_optimum
+    else:
+        approximation_ratio = 1.0  # Cannot compute; default to 1
+
+    logs.append(
+        f"[results_analyzer] Best solution: {best_selection}, "
+        f"obj_val={best_obj_val:.4f}, "
+        f"approx_ratio={approximation_ratio:.4f}, "
+        f"constraint_satisfied={constraint_satisfied}"
+    )
+    if classical_selection:
+        logs.append(f"[results_analyzer] Classical optimum: {classical_selection}, val={classical_optimum:.4f}")
+
+    # ── Build final solution dict ─────────────────────────────────────────
+    final_solution = {
+        "selected_assets": best_selection,
+        "objective_value": best_obj_val,
+        "objective_direction": objective_dir,
+        "constraint_satisfied": constraint_satisfied,
+        "approximation_ratio": approximation_ratio,
+        "classical_optimum_selection": classical_selection,
+        "classical_optimum_value": classical_optimum if isinstance(classical_optimum, float) else None,
+        "optimal_energy": optimal_energy,
+        "top_candidates": candidates[:5],
+        "total_shots": total_shots,
+    }
+
+    # ── Generate visualisations ───────────────────────────────────────────
+    try:
+        hist_fig = _plot_histogram(bitstring_counts)
+        conv_fig = _plot_convergence(convergence_history) if convergence_history else None
+        # Figures are stored in state for Streamlit to render; not serialisable to JSON
+        final_solution["_histogram_fig"] = hist_fig
+        final_solution["_convergence_fig"] = conv_fig
+    except Exception as exc:
+        logger.warning(f"[results_analyzer] Visualisation error: {exc}")
+
+    return {
+        **state,
+        "final_solution": final_solution,
+        "approximation_ratio": approximation_ratio,
+        "constraint_satisfied": constraint_satisfied,
+        "logs": logs,
+        "error": None,
+    }

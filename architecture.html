@@ -1,0 +1,1163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Agentic Quantum Optimization Copilot — Architecture</title>
+<style>
+  :root {
+    --bg:       #0d1117;
+    --surface:  #161b22;
+    --border:   #30363d;
+    --text:     #e6edf3;
+    --muted:    #8b949e;
+    --blue:     #58a6ff;
+    --purple:   #bc8cff;
+    --green:    #3fb950;
+    --yellow:   #d29922;
+    --orange:   #f78166;
+    --teal:     #39d0d8;
+    --pink:     #f778ba;
+    --accent:   #1f6feb;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    font-size: 14px;
+  }
+
+  /* ── Header ── */
+  header {
+    background: linear-gradient(135deg, #0d1117 0%, #161b22 50%, #1a1f29 100%);
+    border-bottom: 1px solid var(--border);
+    padding: 40px 60px 30px;
+    position: relative;
+    overflow: hidden;
+  }
+  header::before {
+    content: "";
+    position: absolute; inset: 0;
+    background: radial-gradient(ellipse at 20% 50%, rgba(88,166,255,0.08) 0%, transparent 60%),
+                radial-gradient(ellipse at 80% 20%, rgba(188,140,255,0.08) 0%, transparent 60%);
+    pointer-events: none;
+  }
+  .header-top { display: flex; justify-content: space-between; align-items: flex-start; }
+  .badge {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: rgba(88,166,255,0.1); border: 1px solid rgba(88,166,255,0.3);
+    color: var(--blue); border-radius: 20px; padding: 4px 12px; font-size: 12px;
+    font-weight: 600; letter-spacing: 0.5px;
+  }
+  h1 {
+    font-size: 32px; font-weight: 700; margin: 16px 0 6px;
+    background: linear-gradient(90deg, #58a6ff, #bc8cff, #39d0d8);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+  .subtitle { color: var(--muted); font-size: 15px; }
+  .meta { display: flex; gap: 24px; margin-top: 20px; flex-wrap: wrap; }
+  .meta-item { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 13px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; }
+
+  /* ── Layout ── */
+  .container { max-width: 1200px; margin: 0 auto; padding: 40px 60px; }
+  .section { margin-bottom: 52px; }
+  .section-title {
+    font-size: 20px; font-weight: 700; margin-bottom: 24px;
+    display: flex; align-items: center; gap: 10px;
+    padding-bottom: 12px; border-bottom: 1px solid var(--border);
+  }
+  .section-title .icon {
+    width: 32px; height: 32px; border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 16px; flex-shrink: 0;
+  }
+
+  /* ── Cards ── */
+  .card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; padding: 20px 24px;
+  }
+  .card-grid { display: grid; gap: 16px; }
+  .card-grid.cols-2 { grid-template-columns: repeat(2, 1fr); }
+  .card-grid.cols-3 { grid-template-columns: repeat(3, 1fr); }
+  .card-grid.cols-4 { grid-template-columns: repeat(4, 1fr); }
+
+  /* ── Pipeline Flow ── */
+  .pipeline {
+    display: flex; align-items: stretch; gap: 0;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 16px; overflow: hidden;
+  }
+  .pipeline-stage {
+    flex: 1; padding: 20px 16px; position: relative;
+    border-right: 1px solid var(--border);
+    transition: background 0.2s;
+  }
+  .pipeline-stage:last-child { border-right: none; }
+  .pipeline-stage:hover { background: rgba(255,255,255,0.03); }
+  .pipeline-stage::after {
+    content: "→";
+    position: absolute; right: -10px; top: 50%;
+    transform: translateY(-50%);
+    color: var(--muted); font-size: 18px; z-index: 2;
+    background: var(--surface); padding: 0 2px;
+  }
+  .pipeline-stage:last-child::after { display: none; }
+  .stage-num {
+    font-size: 11px; font-weight: 700; letter-spacing: 1px;
+    text-transform: uppercase; margin-bottom: 8px;
+  }
+  .stage-name { font-size: 13px; font-weight: 700; margin-bottom: 4px; }
+  .stage-sub { font-size: 11px; color: var(--muted); }
+  .stage-icon { font-size: 24px; margin-bottom: 8px; }
+
+  /* ── Module Cards ── */
+  .module-card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; padding: 0; overflow: hidden;
+  }
+  .module-header {
+    padding: 16px 20px 14px;
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 12px;
+  }
+  .module-num {
+    font-size: 11px; font-weight: 800; letter-spacing: 1px;
+    text-transform: uppercase; color: var(--muted);
+  }
+  .module-title { font-size: 14px; font-weight: 700; }
+  .module-body { padding: 16px 20px; }
+  .module-file {
+    display: inline-block; background: rgba(255,255,255,0.05);
+    border: 1px solid var(--border); border-radius: 6px;
+    padding: 2px 8px; font-family: monospace; font-size: 11px;
+    color: var(--teal); margin-bottom: 10px;
+  }
+  .module-desc { font-size: 13px; color: var(--muted); margin-bottom: 12px; }
+  .step-list { list-style: none; }
+  .step-list li {
+    display: flex; align-items: flex-start; gap: 8px;
+    font-size: 12px; color: var(--muted); margin-bottom: 6px;
+  }
+  .step-list li::before {
+    content: "▸"; color: var(--blue); flex-shrink: 0; margin-top: 1px;
+  }
+
+  /* ── MCP Diagram ── */
+  .mcp-diagram {
+    display: grid; grid-template-columns: 1fr 160px 1fr;
+    gap: 0; align-items: stretch;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 16px; overflow: hidden;
+  }
+  .mcp-side {
+    padding: 24px; display: flex; flex-direction: column; gap: 12px;
+  }
+  .mcp-center {
+    background: rgba(88,166,255,0.05);
+    border-left: 1px solid rgba(88,166,255,0.2);
+    border-right: 1px solid rgba(88,166,255,0.2);
+    padding: 24px 16px;
+    display: flex; flex-direction: column; align-items: center;
+    justify-content: center; gap: 16px;
+  }
+  .mcp-label {
+    font-size: 11px; font-weight: 800; letter-spacing: 1.5px;
+    text-transform: uppercase; color: var(--blue);
+    text-align: center;
+  }
+  .mcp-arrows {
+    display: flex; flex-direction: column; gap: 8px; align-items: center;
+  }
+  .mcp-arrow {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 11px; color: var(--muted);
+  }
+  .tool-chip {
+    background: rgba(88,166,255,0.1); border: 1px solid rgba(88,166,255,0.3);
+    color: var(--blue); border-radius: 6px; padding: 6px 12px;
+    font-size: 12px; font-family: monospace; font-weight: 600;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .tool-chip .dot { background: var(--blue); }
+  .backend-chip {
+    background: rgba(63,185,80,0.1); border: 1px solid rgba(63,185,80,0.3);
+    color: var(--green); border-radius: 6px; padding: 6px 12px;
+    font-size: 12px; font-family: monospace; font-weight: 600;
+    display: flex; align-items: center; gap: 6px;
+  }
+
+  /* ── State Flow ── */
+  .state-flow {
+    display: grid; grid-template-columns: repeat(6, 1fr);
+    gap: 2px; background: var(--border); border-radius: 12px; overflow: hidden;
+  }
+  .state-cell {
+    background: var(--surface); padding: 14px 10px; text-align: center;
+  }
+  .state-cell .field {
+    font-family: monospace; font-size: 11px; color: var(--teal);
+    display: block; margin-bottom: 2px;
+  }
+  .state-cell .owner {
+    font-size: 10px; color: var(--muted);
+  }
+  .state-header {
+    background: rgba(88,166,255,0.1); padding: 10px;
+    text-align: center; font-size: 11px; font-weight: 700;
+    color: var(--blue); text-transform: uppercase; letter-spacing: 1px;
+  }
+
+  /* ── Tech Stack ── */
+  .tech-row {
+    display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px;
+  }
+  .tech-badge {
+    display: flex; align-items: center; gap: 6px;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 8px; padding: 8px 14px;
+    font-size: 12px; font-weight: 600;
+  }
+  .tech-badge .version {
+    font-size: 10px; color: var(--muted); font-weight: 400; margin-left: 2px;
+  }
+
+  /* ── Error Flow ── */
+  .error-flow {
+    display: flex; flex-direction: column; gap: 12px;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; padding: 24px;
+  }
+  .error-row {
+    display: flex; align-items: center; gap: 12px;
+  }
+  .error-from {
+    background: rgba(247,129,102,0.1); border: 1px solid rgba(247,129,102,0.3);
+    color: var(--orange); border-radius: 6px; padding: 6px 12px;
+    font-size: 12px; font-family: monospace; flex-shrink: 0; min-width: 160px;
+    text-align: center;
+  }
+  .error-desc {
+    font-size: 12px; color: var(--muted); flex: 1;
+  }
+  .error-action {
+    background: rgba(63,185,80,0.1); border: 1px solid rgba(63,185,80,0.3);
+    color: var(--green); border-radius: 6px; padding: 6px 12px;
+    font-size: 12px; text-align: center; flex-shrink: 0; min-width: 180px;
+  }
+
+  /* ── Graph diagram SVG ── */
+  .graph-container {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 16px; padding: 32px; overflow-x: auto;
+  }
+
+  /* ── Code block ── */
+  .code-block {
+    background: #0d1117; border: 1px solid var(--border);
+    border-radius: 8px; padding: 16px 20px;
+    font-family: "SF Mono", "Fira Code", monospace; font-size: 12px;
+    line-height: 1.8; overflow-x: auto;
+  }
+  .code-block .kw  { color: #ff7b72; }
+  .code-block .fn  { color: #d2a8ff; }
+  .code-block .str { color: #a5d6ff; }
+  .code-block .cm  { color: #8b949e; font-style: italic; }
+  .code-block .nm  { color: #79c0ff; }
+  .code-block .op  { color: #ff7b72; }
+
+  /* ── Metrics ── */
+  .metric-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+  .metric-card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; padding: 20px; text-align: center;
+  }
+  .metric-value {
+    font-size: 28px; font-weight: 800; margin-bottom: 4px;
+    background: linear-gradient(90deg, var(--blue), var(--purple));
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+  .metric-label { font-size: 12px; color: var(--muted); }
+
+  /* ── Table ── */
+  table { width: 100%; border-collapse: collapse; }
+  th {
+    text-align: left; padding: 10px 14px;
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.8px;
+    color: var(--muted); background: rgba(255,255,255,0.03);
+    border-bottom: 1px solid var(--border);
+  }
+  td {
+    padding: 10px 14px; font-size: 12px; border-bottom: 1px solid rgba(48,54,61,0.5);
+    vertical-align: top;
+  }
+  td:first-child { font-family: monospace; color: var(--teal); }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: rgba(255,255,255,0.02); }
+
+  /* ── Pill ── */
+  .pill {
+    display: inline-block; border-radius: 4px; padding: 2px 8px;
+    font-size: 11px; font-weight: 600;
+  }
+  .pill-blue   { background: rgba(88,166,255,0.15); color: var(--blue); }
+  .pill-purple { background: rgba(188,140,255,0.15); color: var(--purple); }
+  .pill-green  { background: rgba(63,185,80,0.15); color: var(--green); }
+  .pill-orange { background: rgba(247,129,102,0.15); color: var(--orange); }
+  .pill-teal   { background: rgba(57,208,216,0.15); color: var(--teal); }
+
+  /* ── Footer ── */
+  footer {
+    border-top: 1px solid var(--border);
+    padding: 24px 60px;
+    display: flex; justify-content: space-between; align-items: center;
+    color: var(--muted); font-size: 12px;
+  }
+
+  /* ── Print ── */
+  @media print {
+    body { background: white; color: black; }
+    header, .container { padding: 20px; }
+    .card, .module-card, .mcp-diagram, .pipeline, .code-block {
+      border: 1px solid #ddd; break-inside: avoid;
+    }
+  }
+</style>
+</head>
+<body>
+
+<!-- ══════════════════════════════════════════════════
+     HEADER
+═══════════════════════════════════════════════════════ -->
+<header>
+  <div class="header-top">
+    <span class="badge">⚛️ Architecture Document</span>
+    <span style="color:var(--muted);font-size:12px;">v1.0 · 2300030848</span>
+  </div>
+  <h1>Agentic Quantum Optimization Copilot</h1>
+  <p class="subtitle">Full system architecture, pipeline walkthrough, MCP tool calls & data-flow reference</p>
+  <div class="meta">
+    <span class="meta-item"><span class="dot" style="background:var(--blue)"></span>LangGraph Orchestration</span>
+    <span class="meta-item"><span class="dot" style="background:var(--purple)"></span>Model Context Protocol</span>
+    <span class="meta-item"><span class="dot" style="background:var(--green)"></span>Qiskit QAOA</span>
+    <span class="meta-item"><span class="dot" style="background:var(--orange)"></span>IBM Quantum / Aer Simulator</span>
+    <span class="meta-item"><span class="dot" style="background:var(--teal)"></span>Streamlit UI</span>
+    <span class="meta-item" style="margin-left:auto;font-weight:600;color:var(--text)">
+      Kondapi Sri Pranav · Reg. 2300030848
+    </span>
+  </div>
+</header>
+
+<div class="container">
+
+<!-- ══════════════════════════════════════════════════
+     1. HIGH-LEVEL OVERVIEW
+═══════════════════════════════════════════════════════ -->
+<div class="section">
+  <div class="section-title">
+    <div class="icon" style="background:rgba(88,166,255,0.15)">🗺️</div>
+    System Overview
+  </div>
+
+  <div class="metric-grid" style="margin-bottom:24px;">
+    <div class="metric-card">
+      <div class="metric-value">5</div>
+      <div class="metric-label">Processing Modules</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-value">4</div>
+      <div class="metric-label">MCP Tools</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-value">6</div>
+      <div class="metric-label">LangGraph Nodes</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-value">2</div>
+      <div class="metric-label">Backends</div>
+    </div>
+  </div>
+
+  <div class="card" style="padding:24px;margin-bottom:20px;">
+    <p style="font-size:14px;line-height:1.9;color:var(--muted);">
+      The Copilot is a <strong style="color:var(--text)">multi-layer, agentic system</strong> that bridges
+      <strong style="color:var(--blue)">natural language problem descriptions</strong> with
+      <strong style="color:var(--green)">quantum circuit execution</strong> on IBM Quantum hardware or local simulators.
+      A user types a plain-English optimization problem; an LLM agent (Claude) parses it,
+      a QUBO formulator converts it to a Hamiltonian, a QAOA circuit is built and transpiled,
+      a classical COBYLA optimizer tunes the variational parameters via the MCP Estimator tool,
+      and finally the best bitstring solution is decoded and presented with visualizations.
+    </p>
+  </div>
+
+  <!-- 3-layer diagram -->
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;">
+    <div class="card" style="border-color:rgba(88,166,255,0.3);">
+      <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1px;color:var(--blue);margin-bottom:12px;">Layer 1 — Intelligence</div>
+      <div style="font-size:13px;font-weight:600;margin-bottom:6px;">LangGraph + Claude LLM</div>
+      <div style="font-size:12px;color:var(--muted);">Orchestrates the pipeline as a stateful directed graph. Claude parses NL problems and summarises results.</div>
+      <div class="tech-row" style="margin-top:12px;">
+        <span class="pill pill-blue">LangGraph</span>
+        <span class="pill pill-blue">LangChain</span>
+        <span class="pill pill-blue">claude-opus-4-6</span>
+      </div>
+    </div>
+    <div class="card" style="border-color:rgba(188,140,255,0.3);">
+      <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1px;color:var(--purple);margin-bottom:12px;">Layer 2 — Tool Interface</div>
+      <div style="font-size:13px;font-weight:600;margin-bottom:6px;">MCP Server + Client</div>
+      <div style="font-size:12px;color:var(--muted);">Standardised interface between the AI agent and Qiskit. Exposes 4 tools: sampler, estimator, backend-list, validator.</div>
+      <div class="tech-row" style="margin-top:12px;">
+        <span class="pill pill-purple">MCP SDK</span>
+        <span class="pill pill-purple">stdio transport</span>
+      </div>
+    </div>
+    <div class="card" style="border-color:rgba(63,185,80,0.3);">
+      <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1px;color:var(--green);margin-bottom:12px;">Layer 3 — Quantum</div>
+      <div style="font-size:13px;font-weight:600;margin-bottom:6px;">Qiskit + IBM Quantum</div>
+      <div style="font-size:12px;color:var(--muted);">QAOA ansatz generation, transpilation, Sampler/Estimator primitives. Runs on AerSimulator or IBM QPU.</div>
+      <div class="tech-row" style="margin-top:12px;">
+        <span class="pill pill-green">Qiskit 1.0+</span>
+        <span class="pill pill-green">qiskit-aer</span>
+        <span class="pill pill-green">COBYLA</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════
+     2. PIPELINE FLOW
+═══════════════════════════════════════════════════════ -->
+<div class="section">
+  <div class="section-title">
+    <div class="icon" style="background:rgba(63,185,80,0.15)">🔄</div>
+    End-to-End Pipeline
+  </div>
+
+  <!-- User → END arrow -->
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:16px;">
+    <span class="pill pill-teal">User (Streamlit / CLI)</span>
+    <span style="color:var(--muted);font-size:20px;">⟶</span>
+    <span style="color:var(--muted);font-size:12px;font-style:italic;">Natural language problem statement</span>
+  </div>
+
+  <div class="pipeline">
+    <div class="pipeline-stage">
+      <div class="stage-icon">📥</div>
+      <div class="stage-num" style="color:var(--blue)">Module 1</div>
+      <div class="stage-name">Intake Agent</div>
+      <div class="stage-sub">NL → ParsedProblem<br/>Claude LLM</div>
+    </div>
+    <div class="pipeline-stage">
+      <div class="stage-icon">🔢</div>
+      <div class="stage-num" style="color:var(--purple)">Module 2</div>
+      <div class="stage-name">QUBO Formulator</div>
+      <div class="stage-sub">QP → QUBO → Ising<br/>qiskit-optimization</div>
+    </div>
+    <div class="pipeline-stage">
+      <div class="stage-icon">⚛️</div>
+      <div class="stage-num" style="color:var(--green)">Module 3</div>
+      <div class="stage-name">Circuit Constructor</div>
+      <div class="stage-sub">Ising → QAOA ansatz<br/>Transpilation check</div>
+    </div>
+    <div class="pipeline-stage">
+      <div class="stage-icon">🔁</div>
+      <div class="stage-num" style="color:var(--yellow)">Module 4</div>
+      <div class="stage-name">Execution Manager</div>
+      <div class="stage-sub">COBYLA + MCP calls<br/>Hybrid loop</div>
+    </div>
+    <div class="pipeline-stage">
+      <div class="stage-icon">📊</div>
+      <div class="stage-num" style="color:var(--orange)">Module 5</div>
+      <div class="stage-name">Results Analyzer</div>
+      <div class="stage-sub">Bitstrings → Solution<br/>Approx. ratio</div>
+    </div>
+  </div>
+
+  <div style="display:flex;justify-content:flex-end;margin-top:12px;align-items:center;gap:8px;">
+    <span style="color:var(--muted);font-size:12px;font-style:italic;">Final solution + visualizations</span>
+    <span style="color:var(--muted);font-size:20px;">⟶</span>
+    <span class="pill pill-teal">Streamlit Dashboard</span>
+  </div>
+
+  <!-- Detailed flow table -->
+  <div class="card" style="margin-top:24px;padding:0;overflow:hidden;">
+    <table>
+      <thead>
+        <tr>
+          <th>Stage</th><th>Input from State</th><th>Key Operation</th><th>Output to State</th><th>Error Behaviour</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>intake</td>
+          <td><code style="color:var(--blue);font-size:11px;">user_input</code></td>
+          <td style="color:var(--text);">LLM extracts assets, objective, constraints → JSON</td>
+          <td><code style="color:var(--teal);font-size:11px;">parsed_problem</code></td>
+          <td style="color:var(--muted);">Sets error; if clarification needed → END</td>
+        </tr>
+        <tr>
+          <td>formulate</td>
+          <td><code style="color:var(--blue);font-size:11px;">parsed_problem</code></td>
+          <td style="color:var(--text);">QuadraticProgram → QUBO → SparsePauliOp (Ising)</td>
+          <td><code style="color:var(--teal);font-size:11px;">qubo_matrix, ising_hamiltonian</code></td>
+          <td style="color:var(--muted);">Sets error → handle_error</td>
+        </tr>
+        <tr>
+          <td>construct_circuit</td>
+          <td><code style="color:var(--blue);font-size:11px;">ising_hamiltonian, num_qubits</code></td>
+          <td style="color:var(--text);">QAOAAnsatz(reps=p) + preset pass manager transpile</td>
+          <td><code style="color:var(--teal);font-size:11px;">circuit_qasm, circuit_depth, num_parameters</code></td>
+          <td style="color:var(--muted);">Qubit overflow → transpilation_feasible=False</td>
+        </tr>
+        <tr>
+          <td>execute</td>
+          <td><code style="color:var(--blue);font-size:11px;">circuit_qasm, ising_hamiltonian</code></td>
+          <td style="color:var(--text);">COBYLA calls MCP Estimator iteratively; samples at convergence</td>
+          <td><code style="color:var(--teal);font-size:11px;">optimal_params, convergence_history, bitstring_counts</code></td>
+          <td style="color:var(--muted);">IBM fail → auto-fallback to AerSimulator</td>
+        </tr>
+        <tr>
+          <td>analyze</td>
+          <td><code style="color:var(--blue);font-size:11px;">bitstring_counts, parsed_problem</code></td>
+          <td style="color:var(--text);">Decode bitstrings, check constraints, brute-force approx. ratio</td>
+          <td><code style="color:var(--teal);font-size:11px;">final_solution, approximation_ratio</code></td>
+          <td style="color:var(--muted);">No feasible solution → returns highest-probability candidate</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════
+     3. LANGGRAPH STATE MACHINE
+═══════════════════════════════════════════════════════ -->
+<div class="section">
+  <div class="section-title">
+    <div class="icon" style="background:rgba(188,140,255,0.15)">🕸️</div>
+    LangGraph StateGraph
+  </div>
+
+  <div class="graph-container">
+    <svg viewBox="0 0 960 320" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto;display:block;">
+      <defs>
+        <marker id="ah" markerWidth="8" markerHeight="8" refX="8" refY="3" orient="auto">
+          <path d="M0,0 L0,6 L8,3 z" fill="#58a6ff"/>
+        </marker>
+        <marker id="aherr" markerWidth="8" markerHeight="8" refX="8" refY="3" orient="auto">
+          <path d="M0,0 L0,6 L8,3 z" fill="#f78166"/>
+        </marker>
+        <marker id="ahgrn" markerWidth="8" markerHeight="8" refX="8" refY="3" orient="auto">
+          <path d="M0,0 L0,6 L8,3 z" fill="#3fb950"/>
+        </marker>
+      </defs>
+
+      <!-- Happy path arrows -->
+      <line x1="126" y1="100" x2="188" y2="100" stroke="#58a6ff" stroke-width="1.5" marker-end="url(#ah)"/>
+      <line x1="308" y1="100" x2="368" y2="100" stroke="#58a6ff" stroke-width="1.5" marker-end="url(#ah)"/>
+      <line x1="488" y1="100" x2="548" y2="100" stroke="#58a6ff" stroke-width="1.5" marker-end="url(#ah)"/>
+      <line x1="668" y1="100" x2="728" y2="100" stroke="#58a6ff" stroke-width="1.5" marker-end="url(#ah)"/>
+      <line x1="848" y1="100" x2="910" y2="100" stroke="#3fb950" stroke-width="1.5" marker-end="url(#ahgrn)"/>
+
+      <!-- Error paths (down to handle_error) -->
+      <line x1="248" y1="124" x2="248" y2="240" stroke="#f78166" stroke-width="1.2" stroke-dasharray="4,3" marker-end="url(#aherr)"/>
+      <line x1="428" y1="124" x2="428" y2="240" stroke="#f78166" stroke-width="1.2" stroke-dasharray="4,3" marker-end="url(#aherr)"/>
+      <line x1="608" y1="124" x2="608" y2="240" stroke="#f78166" stroke-width="1.2" stroke-dasharray="4,3" marker-end="url(#aherr)"/>
+      <line x1="788" y1="124" x2="788" y2="240" stroke="#f78166" stroke-width="1.2" stroke-dasharray="4,3" marker-end="url(#aherr)"/>
+
+      <!-- handle_error retry arc -->
+      <path d="M 420 264 Q 250 320 250 264" stroke="#f78166" stroke-width="1.2" stroke-dasharray="4,3" fill="none" marker-end="url(#aherr)"/>
+
+      <!-- Nodes: happy path -->
+      <!-- START -->
+      <circle cx="50" cy="100" r="28" fill="#0d1117" stroke="#3fb950" stroke-width="2"/>
+      <text x="50" y="97" text-anchor="middle" fill="#3fb950" font-size="10" font-weight="700">START</text>
+      <line x1="78" y1="100" x2="128" y2="100" stroke="#3fb950" stroke-width="1.5" marker-end="url(#ahgrn)"/>
+
+      <!-- intake -->
+      <rect x="130" y="74" width="116" height="52" rx="10" fill="#1a2233" stroke="#58a6ff" stroke-width="1.5"/>
+      <text x="188" y="95" text-anchor="middle" fill="#58a6ff" font-size="11" font-weight="700">intake</text>
+      <text x="188" y="110" text-anchor="middle" fill="#8b949e" font-size="9">Module 1</text>
+      <text x="188" y="121" text-anchor="middle" fill="#8b949e" font-size="9">LLM → ParsedProblem</text>
+
+      <!-- formulate -->
+      <rect x="310" y="74" width="116" height="52" rx="10" fill="#1a2233" stroke="#bc8cff" stroke-width="1.5"/>
+      <text x="368" y="95" text-anchor="middle" fill="#bc8cff" font-size="11" font-weight="700">formulate</text>
+      <text x="368" y="110" text-anchor="middle" fill="#8b949e" font-size="9">Module 2</text>
+      <text x="368" y="121" text-anchor="middle" fill="#8b949e" font-size="9">QUBO → Ising</text>
+
+      <!-- construct_circuit -->
+      <rect x="490" y="74" width="116" height="52" rx="10" fill="#1a2233" stroke="#3fb950" stroke-width="1.5"/>
+      <text x="548" y="95" text-anchor="middle" fill="#3fb950" font-size="11" font-weight="700">construct</text>
+      <text x="548" y="110" text-anchor="middle" fill="#8b949e" font-size="9">Module 3</text>
+      <text x="548" y="121" text-anchor="middle" fill="#8b949e" font-size="9">QAOA ansatz</text>
+
+      <!-- execute -->
+      <rect x="670" y="74" width="116" height="52" rx="10" fill="#1a2233" stroke="#d29922" stroke-width="1.5"/>
+      <text x="728" y="95" text-anchor="middle" fill="#d29922" font-size="11" font-weight="700">execute</text>
+      <text x="728" y="110" text-anchor="middle" fill="#8b949e" font-size="9">Module 4</text>
+      <text x="728" y="121" text-anchor="middle" fill="#8b949e" font-size="9">Hybrid loop / MCP</text>
+
+      <!-- analyze -->
+      <rect x="850" y="74" width="66" height="52" rx="10" fill="#1a2233" stroke="#f78166" stroke-width="1.5"/>
+      <text x="883" y="95" text-anchor="middle" fill="#f78166" font-size="11" font-weight="700">analyze</text>
+      <text x="883" y="110" text-anchor="middle" fill="#8b949e" font-size="9">Module 5</text>
+
+      <!-- END -->
+      <circle cx="940" cy="100" r="24" fill="#0d1117" stroke="#3fb950" stroke-width="2"/>
+      <text x="940" y="97" text-anchor="middle" fill="#3fb950" font-size="10" font-weight="700">END</text>
+
+      <!-- handle_error node (bottom) -->
+      <rect x="340" y="232" width="136" height="52" rx="10" fill="#1a1010" stroke="#f78166" stroke-width="1.5"/>
+      <text x="408" y="252" text-anchor="middle" fill="#f78166" font-size="11" font-weight="700">handle_error</text>
+      <text x="408" y="267" text-anchor="middle" fill="#8b949e" font-size="9">IBM→Aer fallback</text>
+      <text x="408" y="278" text-anchor="middle" fill="#8b949e" font-size="9">retry_count++</text>
+
+      <!-- Legend -->
+      <line x1="60" y1="290" x2="90" y2="290" stroke="#58a6ff" stroke-width="1.5" marker-end="url(#ah)"/>
+      <text x="94" y="294" fill="#8b949e" font-size="10">Happy path</text>
+      <line x1="170" y1="290" x2="200" y2="290" stroke="#f78166" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#aherr)"/>
+      <text x="204" y="294" fill="#8b949e" font-size="10">Error / retry</text>
+      <line x1="280" y1="290" x2="310" y2="290" stroke="#3fb950" stroke-width="1.5" marker-end="url(#ahgrn)"/>
+      <text x="314" y="294" fill="#8b949e" font-size="10">Terminal</text>
+    </svg>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════
+     4. THE 5 MODULES
+═══════════════════════════════════════════════════════ -->
+<div class="section">
+  <div class="section-title">
+    <div class="icon" style="background:rgba(57,208,216,0.15)">🧩</div>
+    The 5 Processing Modules
+  </div>
+
+  <div class="card-grid cols-2" style="row-gap:16px;">
+
+    <!-- Module 1 -->
+    <div class="module-card" style="border-color:rgba(88,166,255,0.3);">
+      <div class="module-header" style="background:rgba(88,166,255,0.05);">
+        <span class="module-num">Module 1</span>
+        <span class="module-title">Problem Intake &amp; Reasoning Agent</span>
+      </div>
+      <div class="module-body">
+        <span class="module-file">modules/intake_agent.py</span>
+        <p class="module-desc">Uses Claude LLM to parse a natural language problem into a structured JSON object containing decision variables, objective function, and constraints.</p>
+        <ul class="step-list">
+          <li>Sends user input + system prompt to <code style="color:var(--blue);font-size:11px;">claude-opus-4-6</code></li>
+          <li>Extracts assets, objective direction, weights</li>
+          <li>Separates hard vs soft constraints</li>
+          <li>Returns <code style="color:var(--teal);font-size:11px;">clarification_needed=True</code> if problem is under-defined</li>
+          <li>Graph routes to <code style="color:var(--orange);font-size:11px;">END</code> if clarification is needed</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- Module 2 -->
+    <div class="module-card" style="border-color:rgba(188,140,255,0.3);">
+      <div class="module-header" style="background:rgba(188,140,255,0.05);">
+        <span class="module-num">Module 2</span>
+        <span class="module-title">Automated QUBO Formulator</span>
+      </div>
+      <div class="module-body">
+        <span class="module-file">modules/qubo_formulator.py</span>
+        <p class="module-desc">Converts the parsed problem into a mathematical Quadratic Unconstrained Binary Optimization model, then maps it to a quantum Ising Hamiltonian.</p>
+        <ul class="step-list">
+          <li>Builds <code style="color:var(--purple);font-size:11px;">qiskit_optimization.QuadraticProgram</code></li>
+          <li>Adds binary variables (one per asset)</li>
+          <li>Encodes cardinality + budget constraints</li>
+          <li>Runs <code style="color:var(--purple);font-size:11px;">QuadraticProgramToQubo</code> (slack variables)</li>
+          <li>Calls <code style="color:var(--purple);font-size:11px;">to_ising()</code> → <code style="color:var(--teal);font-size:11px;">SparsePauliOp</code></li>
+          <li>Extracts QUBO Q-matrix for visualization</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- Module 3 -->
+    <div class="module-card" style="border-color:rgba(63,185,80,0.3);">
+      <div class="module-header" style="background:rgba(63,185,80,0.05);">
+        <span class="module-num">Module 3</span>
+        <span class="module-title">Quantum Circuit Constructor</span>
+      </div>
+      <div class="module-body">
+        <span class="module-file">modules/circuit_constructor.py</span>
+        <p class="module-desc">Builds the QAOA parameterised ansatz from the Ising Hamiltonian and validates it against the target hardware via transpilation.</p>
+        <ul class="step-list">
+          <li>Chooses QAOA layers p: 2 (n≤5), 1 (n≤10), 1 (n&gt;10)</li>
+          <li>Instantiates <code style="color:var(--green);font-size:11px;">QAOAAnsatz(cost_operator=H, reps=p)</code></li>
+          <li>Runs <code style="color:var(--green);font-size:11px;">generate_preset_pass_manager(level=1)</code></li>
+          <li>Checks qubit count ≤ backend capacity</li>
+          <li>Checks transpiled depth ≤ 200 (coherence limit)</li>
+          <li>Serialises to <strong>OpenQASM 3</strong> for MCP transport</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- Module 4 -->
+    <div class="module-card" style="border-color:rgba(210,153,34,0.3);">
+      <div class="module-header" style="background:rgba(210,153,34,0.05);">
+        <span class="module-num">Module 4</span>
+        <span class="module-title">Hybrid Execution Manager via MCP</span>
+      </div>
+      <div class="module-body">
+        <span class="module-file">modules/execution_manager.py</span>
+        <p class="module-desc">The heart of the system — runs the classical-quantum hybrid optimisation loop using COBYLA and MCP tool calls.</p>
+        <ul class="step-list">
+          <li>Serialises Hamiltonian to JSON for MCP transport</li>
+          <li>Initialises random γ/β parameters in [0, π]</li>
+          <li>COBYLA calls <code style="color:var(--yellow);font-size:11px;">MCP Estimator</code> each iteration</li>
+          <li>On IBM failure → auto-fallback to AerSimulator</li>
+          <li>After convergence: calls <code style="color:var(--yellow);font-size:11px;">MCP Sampler</code> for bitstrings</li>
+          <li>Saves full experiment log (params, energy history) to <code style="color:var(--teal);font-size:11px;">logs/</code></li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- Module 5 (full width) -->
+    <div class="module-card" style="border-color:rgba(247,129,102,0.3);grid-column:1/-1;">
+      <div class="module-header" style="background:rgba(247,129,102,0.05);">
+        <span class="module-num">Module 5</span>
+        <span class="module-title">Results Analyzer &amp; Visualizer</span>
+      </div>
+      <div class="module-body" style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+        <div>
+          <span class="module-file">modules/results_analyzer.py</span>
+          <p class="module-desc">Decodes raw quantum measurement bitstrings into human-readable asset selections, validates constraints, and generates visualisations.</p>
+          <ul class="step-list">
+            <li>Decodes bitstrings: rightmost bit = q₀ = first asset</li>
+            <li>Checks hard constraint satisfaction per candidate</li>
+            <li>Selects best feasible solution by objective value</li>
+            <li>Brute-force classical optimum (n ≤ 20) for Approx. Ratio</li>
+            <li>Approx. Ratio = quantum_obj / classical_optimum</li>
+          </ul>
+        </div>
+        <div>
+          <div style="font-size:12px;font-weight:700;color:var(--orange);margin-bottom:8px;">Outputs</div>
+          <ul class="step-list">
+            <li>Selected assets + objective value</li>
+            <li>Constraint satisfaction flag (✅ / ❌)</li>
+            <li>Approximation ratio vs classical optimum</li>
+            <li>Matplotlib histogram: top-10 bitstring probabilities</li>
+            <li>Matplotlib convergence curve: energy vs COBYLA iteration</li>
+            <li>Top-5 candidate solutions table</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════
+     5. MCP ARCHITECTURE
+═══════════════════════════════════════════════════════ -->
+<div class="section">
+  <div class="section-title">
+    <div class="icon" style="background:rgba(188,140,255,0.15)">🔌</div>
+    Model Context Protocol (MCP) Architecture
+  </div>
+
+  <div class="mcp-diagram" style="margin-bottom:24px;">
+    <!-- Left: LangGraph Agent side -->
+    <div class="mcp-side">
+      <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1px;color:var(--blue);margin-bottom:8px;">AI Agent Side</div>
+      <div style="font-size:13px;font-weight:700;margin-bottom:12px;">LangGraph execute node</div>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:16px;">
+        <code style="color:var(--teal)">execution_manager.py</code> calls
+        <code style="color:var(--teal)">_call_mcp_tool()</code> from
+        <code style="color:var(--teal)">tools/mcp_client.py</code>
+      </div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:8px;font-weight:600;">LangChain Tool Wrappers:</div>
+      <div class="tool-chip"><span class="dot"></span>QAOASamplerTool</div>
+      <div class="tool-chip" style="margin-top:6px;"><span class="dot"></span>EstimatorTool</div>
+      <div class="tool-chip" style="margin-top:6px;"><span class="dot"></span>BackendListTool</div>
+      <div class="tool-chip" style="margin-top:6px;"><span class="dot"></span>CircuitValidatorTool</div>
+      <div style="margin-top:16px;font-size:11px;color:var(--muted);">
+        Event loop detection: uses <code style="color:var(--blue)">asyncio.get_running_loop()</code>
+        to fall back to <code style="color:var(--blue)">ThreadPoolExecutor</code> inside Streamlit.
+      </div>
+    </div>
+
+    <!-- Center: MCP channel -->
+    <div class="mcp-center">
+      <div class="mcp-label">MCP<br/>Protocol</div>
+      <div class="mcp-arrows">
+        <div class="mcp-arrow">tool call →<br/><small>(JSON args)</small></div>
+        <div style="font-size:20px;color:var(--purple);">⇄</div>
+        <div class="mcp-arrow">← result<br/><small>(TextContent)</small></div>
+      </div>
+      <div style="font-size:10px;color:var(--muted);text-align:center;line-height:1.6;">
+        stdio transport<br/>subprocess<br/>ClientSession
+      </div>
+    </div>
+
+    <!-- Right: MCP Server -->
+    <div class="mcp-side" style="background:rgba(188,140,255,0.03);">
+      <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1px;color:var(--purple);margin-bottom:8px;">MCP Server Side</div>
+      <div style="font-size:13px;font-weight:700;margin-bottom:12px;font-family:monospace;">mcp_server.py</div>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:16px;">
+        Registered MCP tools exposed via <code style="color:var(--purple)">@app.call_tool()</code> handler:
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:10px;">
+        <div>
+          <div style="font-size:12px;font-weight:700;color:var(--text);margin-bottom:4px;">
+            <code style="color:var(--purple)">run_qaoa_sampler</code>
+          </div>
+          <div style="font-size:11px;color:var(--muted);">Loads QASM circuit, binds params, adds measurements, runs <code style="color:var(--green)">SamplerV2</code> → bitstring counts</div>
+        </div>
+        <div>
+          <div style="font-size:12px;font-weight:700;color:var(--text);margin-bottom:4px;">
+            <code style="color:var(--purple)">run_estimator</code>
+          </div>
+          <div style="font-size:11px;color:var(--muted);">Deserialises Hamiltonian from JSON, runs <code style="color:var(--green)">EstimatorV2</code> → expectation value ⟨H⟩</div>
+        </div>
+        <div>
+          <div style="font-size:12px;font-weight:700;color:var(--text);margin-bottom:4px;">
+            <code style="color:var(--purple)">list_backends</code>
+          </div>
+          <div style="font-size:11px;color:var(--muted);">Queries <code style="color:var(--green)">QiskitRuntimeService</code> for operational IBM QPUs + local AerSimulator</div>
+        </div>
+        <div>
+          <div style="font-size:12px;font-weight:700;color:var(--text);margin-bottom:4px;">
+            <code style="color:var(--purple)">validate_circuit</code>
+          </div>
+          <div style="font-size:11px;color:var(--muted);">Transpiles circuit → reports depth, gate count, qubit count, feasibility flag</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Backend selection -->
+  <div class="card-grid cols-2">
+    <div class="card">
+      <div style="font-size:13px;font-weight:700;margin-bottom:12px;display:flex;align-items:center;gap:8px;">
+        <span style="font-size:18px;">🖥️</span> Local Backend: AerSimulator
+      </div>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:12px;">Default backend. No credentials required. Uses <code style="color:var(--green)">qiskit-aer</code> statevector simulation.</div>
+      <div class="backend-chip"><span class="dot" style="background:var(--green)"></span>aer_simulator</div>
+      <ul class="step-list" style="margin-top:10px;">
+        <li>SamplerV2 / EstimatorV2 from qiskit-aer</li>
+        <li>Fast, deterministic, up to ~32 qubits</li>
+        <li>Default fallback when IBM Quantum fails</li>
+      </ul>
+    </div>
+    <div class="card">
+      <div style="font-size:13px;font-weight:700;margin-bottom:12px;display:flex;align-items:center;gap:8px;">
+        <span style="font-size:18px;">☁️</span> Cloud Backend: IBM Quantum
+      </div>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:12px;">Real QPU execution. Requires <code style="color:var(--blue)">IBM_QUANTUM_TOKEN</code> env var.</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <div class="backend-chip" style="background:rgba(88,166,255,0.1);border-color:rgba(88,166,255,0.3);color:var(--blue);">ibm_brisbane</div>
+        <div class="backend-chip" style="background:rgba(88,166,255,0.1);border-color:rgba(88,166,255,0.3);color:var(--blue);">ibm_kyoto</div>
+      </div>
+      <ul class="step-list" style="margin-top:10px;">
+        <li>QiskitRuntimeService + Session</li>
+        <li>SamplerV2 / EstimatorV2 IBM primitives</li>
+        <li>Hardware noise, real superconducting qubits</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════
+     6. AgentState DATA FLOW
+═══════════════════════════════════════════════════════ -->
+<div class="section">
+  <div class="section-title">
+    <div class="icon" style="background:rgba(57,208,216,0.15)">📦</div>
+    AgentState — Shared Data Flow
+  </div>
+
+  <p style="color:var(--muted);font-size:13px;margin-bottom:16px;">
+    Every node reads from and writes to a single <code style="color:var(--teal)">AgentState</code> TypedDict.
+    Fields accumulate as the pipeline progresses.
+  </p>
+
+  <div class="card" style="padding:0;overflow:hidden;">
+    <table>
+      <thead>
+        <tr><th>Field</th><th>Type</th><th>Written by</th><th>Read by</th><th>Description</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>user_input</td><td style="color:var(--muted)">str</td><td><span class="pill pill-teal">user</span></td><td><span class="pill pill-blue">intake</span></td><td style="color:var(--muted)">Raw NL problem statement</td></tr>
+        <tr><td>backend_name</td><td style="color:var(--muted)">str</td><td><span class="pill pill-teal">user</span></td><td><span class="pill pill-green">construct</span> <span class="pill pill-yellow">execute</span></td><td style="color:var(--muted)">"aer_simulator" or IBM backend name</td></tr>
+        <tr><td>parsed_problem</td><td style="color:var(--muted)">ParsedProblem</td><td><span class="pill pill-blue">intake</span></td><td><span class="pill pill-purple">formulate</span> <span class="pill pill-orange">analyze</span></td><td style="color:var(--muted)">Structured: assets, objective, weights, constraints</td></tr>
+        <tr><td>qubo_matrix</td><td style="color:var(--muted)">list[list[float]]</td><td><span class="pill pill-purple">formulate</span></td><td><span class="pill pill-teal">UI</span></td><td style="color:var(--muted)">Q-matrix for visualization heatmap</td></tr>
+        <tr><td>ising_hamiltonian</td><td style="color:var(--muted)">SparsePauliOp</td><td><span class="pill pill-purple">formulate</span></td><td><span class="pill pill-green">construct</span> <span class="pill pill-yellow">execute</span></td><td style="color:var(--muted)">Qiskit SparsePauliOp object (not serialisable)</td></tr>
+        <tr><td>circuit_qasm</td><td style="color:var(--muted)">str</td><td><span class="pill pill-green">construct</span></td><td><span class="pill pill-yellow">execute</span> <span class="pill pill-teal">UI</span></td><td style="color:var(--muted)">OpenQASM 3 string of the QAOA ansatz</td></tr>
+        <tr><td>num_parameters</td><td style="color:var(--muted)">int</td><td><span class="pill pill-green">construct</span></td><td><span class="pill pill-yellow">execute</span></td><td style="color:var(--muted)">2 × reps (gamma + beta per layer)</td></tr>
+        <tr><td>transpilation_feasible</td><td style="color:var(--muted)">bool</td><td><span class="pill pill-green">construct</span></td><td><span class="pill pill-yellow">execute</span></td><td style="color:var(--muted)">False if depth &gt; 200 or qubit overflow</td></tr>
+        <tr><td>optimal_params</td><td style="color:var(--muted)">list[float]</td><td><span class="pill pill-yellow">execute</span></td><td><span class="pill pill-orange">analyze</span> <span class="pill pill-teal">UI</span></td><td style="color:var(--muted)">Converged γ/β values from COBYLA</td></tr>
+        <tr><td>convergence_history</td><td style="color:var(--muted)">list[float]</td><td><span class="pill pill-yellow">execute</span></td><td><span class="pill pill-orange">analyze</span> <span class="pill pill-teal">UI</span></td><td style="color:var(--muted)">Energy ⟨H⟩ per COBYLA iteration</td></tr>
+        <tr><td>bitstring_counts</td><td style="color:var(--muted)">dict[str,int]</td><td><span class="pill pill-yellow">execute</span></td><td><span class="pill pill-orange">analyze</span></td><td style="color:var(--muted)">Measurement histogram from Sampler</td></tr>
+        <tr><td>final_solution</td><td style="color:var(--muted)">dict</td><td><span class="pill pill-orange">analyze</span></td><td><span class="pill pill-teal">UI</span></td><td style="color:var(--muted)">Human-readable result + matplotlib figures</td></tr>
+        <tr><td>error</td><td style="color:var(--muted)">str | None</td><td><span class="pill pill-orange">any node</span></td><td><span class="pill pill-orange">graph router</span></td><td style="color:var(--muted);">Triggers handle_error when non-None</td></tr>
+        <tr><td>retry_count</td><td style="color:var(--muted)">int</td><td><span class="pill pill-orange">handle_error</span></td><td><span class="pill pill-orange">handle_error</span></td><td style="color:var(--muted)">Max 2 retries before terminal END</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════
+     7. HYBRID LOOP DETAIL
+═══════════════════════════════════════════════════════ -->
+<div class="section">
+  <div class="section-title">
+    <div class="icon" style="background:rgba(210,153,34,0.15)">🔁</div>
+    Classical-Quantum Hybrid Loop (Module 4)
+  </div>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;">
+    <!-- Loop diagram -->
+    <div class="card" style="padding:24px;">
+      <div style="font-size:13px;font-weight:700;margin-bottom:16px;color:var(--yellow);">COBYLA Optimisation Loop</div>
+      <div style="display:flex;flex-direction:column;gap:12px;">
+        <div style="display:flex;align-items:center;gap:12px;">
+          <div style="background:rgba(210,153,34,0.15);border:1px solid rgba(210,153,34,0.3);border-radius:8px;padding:10px 14px;font-size:12px;font-weight:600;color:var(--yellow);min-width:140px;text-align:center;">Init γ,β ∈ [0,π]</div>
+          <div style="font-size:11px;color:var(--muted);">Random initial parameters<br/><code style="color:var(--teal)">np.random.default_rng(seed=42)</code></div>
+        </div>
+        <div style="text-align:center;color:var(--muted);">↓</div>
+        <div style="display:flex;align-items:center;gap:12px;">
+          <div style="background:rgba(88,166,255,0.1);border:1px solid rgba(88,166,255,0.3);border-radius:8px;padding:10px 14px;font-size:12px;font-weight:600;color:var(--blue);min-width:140px;text-align:center;">MCP Estimator</div>
+          <div style="font-size:11px;color:var(--muted);">Calls <code style="color:var(--purple)">run_estimator</code> tool<br/>Returns ⟨ψ(θ)|H|ψ(θ)⟩</div>
+        </div>
+        <div style="text-align:center;color:var(--muted);">↓</div>
+        <div style="display:flex;align-items:center;gap:12px;">
+          <div style="background:rgba(210,153,34,0.15);border:1px solid rgba(210,153,34,0.3);border-radius:8px;padding:10px 14px;font-size:12px;font-weight:600;color:var(--yellow);min-width:140px;text-align:center;">COBYLA update</div>
+          <div style="font-size:11px;color:var(--muted);">scipy minimize, method="COBYLA"<br/>maxiter=200, rhobeg=0.5</div>
+        </div>
+        <div style="text-align:center;color:var(--muted);">↓ (loop until convergence)</div>
+        <div style="display:flex;align-items:center;gap:12px;">
+          <div style="background:rgba(63,185,80,0.1);border:1px solid rgba(63,185,80,0.3);border-radius:8px;padding:10px 14px;font-size:12px;font-weight:600;color:var(--green);min-width:140px;text-align:center;">MCP Sampler</div>
+          <div style="font-size:11px;color:var(--muted);">Calls <code style="color:var(--purple)">run_qaoa_sampler</code> tool<br/>1024 shots → bitstring counts</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Code snippet -->
+    <div>
+      <div style="font-size:13px;font-weight:700;margin-bottom:12px;">Objective Function (simplified)</div>
+      <div class="code-block">
+<span class="cm"># modules/execution_manager.py</span>
+<br/><br/>
+<span class="kw">def</span> <span class="fn">objective</span>(params_array: np.ndarray) → <span class="nm">float</span>:
+<br/>    <span class="kw">for</span> attempt <span class="kw">in</span> <span class="fn">range</span>(_MAX_RETRIES):
+<br/>        <span class="kw">try</span>:
+<br/>            ev = <span class="fn">_call_estimator</span>(
+<br/>                circuit_qasm, observables_json,
+<br/>                params_array.tolist(), active_backend
+<br/>            )
+<br/>            convergence_history.<span class="fn">append</span>(ev)
+<br/>            <span class="kw">return</span> ev
+<br/>        <span class="kw">except</span> RuntimeError:
+<br/>            <span class="cm"># IBM failure → switch to AerSimulator</span>
+<br/>            active_backend = <span class="str">"aer_simulator"</span>
+<br/><br/>
+opt_result = <span class="fn">minimize</span>(
+<br/>    objective, x0=initial_params,
+<br/>    method=<span class="str">"COBYLA"</span>,
+<br/>    options={<span class="str">"maxiter"</span>: <span class="nm">200</span>}
+<br/>)
+      </div>
+
+      <div style="font-size:13px;font-weight:700;margin-top:20px;margin-bottom:12px;">Parameter Encoding</div>
+      <div class="card" style="padding:16px;">
+        <div style="font-size:12px;color:var(--muted);margin-bottom:10px;">For <strong style="color:var(--text)">p QAOA layers</strong>, the parameter vector is:</div>
+        <div style="font-family:monospace;font-size:14px;color:var(--blue);background:rgba(88,166,255,0.05);padding:10px;border-radius:6px;text-align:center;">
+          [γ₁, β₁, γ₂, β₂, …, γₚ, βₚ]
+        </div>
+        <div style="font-size:12px;color:var(--muted);margin-top:10px;">
+          <strong style="color:var(--text)">γ</strong> (gamma) controls the cost Hamiltonian rotation.<br/>
+          <strong style="color:var(--text)">β</strong> (beta) controls the mixer Hamiltonian rotation.
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════
+     8. ERROR HANDLING
+═══════════════════════════════════════════════════════ -->
+<div class="section">
+  <div class="section-title">
+    <div class="icon" style="background:rgba(247,129,102,0.15)">🛡️</div>
+    Error Handling &amp; Fallback Strategy
+  </div>
+
+  <div class="error-flow">
+    <div class="error-row">
+      <div class="error-from">IBM Quantum failure</div>
+      <div class="error-desc">Any RuntimeError from IBM primitives during COBYLA iteration</div>
+      <div class="error-action">→ Auto-switch to AerSimulator, retry same iteration</div>
+    </div>
+    <div style="border-top:1px solid var(--border);margin:8px 0;"></div>
+    <div class="error-row">
+      <div class="error-from">Qubit overflow</div>
+      <div class="error-desc">Problem requires more qubits than the target backend supports</div>
+      <div class="error-action">→ transpilation_feasible=False, error set, user notified</div>
+    </div>
+    <div style="border-top:1px solid var(--border);margin:8px 0;"></div>
+    <div class="error-row">
+      <div class="error-from">Depth exceeded</div>
+      <div class="error-desc">Transpiled circuit depth &gt; 200 gates (coherence budget)</div>
+      <div class="error-action">→ Warning logged, execution continues with flag</div>
+    </div>
+    <div style="border-top:1px solid var(--border);margin:8px 0;"></div>
+    <div class="error-row">
+      <div class="error-from">Clarification needed</div>
+      <div class="error-desc">LLM cannot extract sufficient information from user input</div>
+      <div class="error-action">→ Graph routes to END, clarification question surfaced</div>
+    </div>
+    <div style="border-top:1px solid var(--border);margin:8px 0;"></div>
+    <div class="error-row">
+      <div class="error-from">General node failure</div>
+      <div class="error-desc">Any exception in any node sets state['error']</div>
+      <div class="error-action">→ handle_error node, retry_count++, max 2 retries</div>
+    </div>
+    <div style="border-top:1px solid var(--border);margin:8px 0;"></div>
+    <div class="error-row">
+      <div class="error-from">No feasible solution</div>
+      <div class="error-desc">All top bitstrings violate hard constraints</div>
+      <div class="error-action">→ Return highest-probability candidate with warning</div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════
+     9. FILE STRUCTURE
+═══════════════════════════════════════════════════════ -->
+<div class="section">
+  <div class="section-title">
+    <div class="icon" style="background:rgba(57,208,216,0.15)">📂</div>
+    Project File Structure
+  </div>
+
+  <div class="card-grid cols-2">
+    <div>
+      <div class="code-block" style="line-height:2;">
+<span style="color:var(--muted);">quantumportfoliooptimization/</span><br/>
+├── <span style="color:var(--blue);">app.py</span>                 <span style="color:var(--muted);font-size:11px;"># Streamlit UI</span><br/>
+├── <span style="color:var(--purple);">mcp_server.py</span>         <span style="color:var(--muted);font-size:11px;"># MCP tool server</span><br/>
+├── <span style="color:var(--muted);">requirements.txt</span><br/>
+├── <span style="color:var(--muted);">.env.example</span><br/>
+├── <span style="color:var(--muted);">agents/</span><br/>
+│   ├── <span style="color:var(--teal);">states.py</span>           <span style="color:var(--muted);font-size:11px;"># AgentState TypedDict</span><br/>
+│   ├── <span style="color:var(--teal);">graph.py</span>            <span style="color:var(--muted);font-size:11px;"># LangGraph StateGraph</span><br/>
+│   └── <span style="color:var(--teal);">orchestrator.py</span>     <span style="color:var(--muted);font-size:11px;"># LLM summarizer</span><br/>
+├── <span style="color:var(--muted);">modules/</span><br/>
+│   ├── <span style="color:var(--blue);">intake_agent.py</span>     <span style="color:var(--muted);font-size:11px;"># Module 1</span><br/>
+│   ├── <span style="color:var(--purple);">qubo_formulator.py</span>  <span style="color:var(--muted);font-size:11px;"># Module 2</span><br/>
+│   ├── <span style="color:var(--green);">circuit_constructor.py</span> <span style="color:var(--muted);font-size:11px;"># Module 3</span><br/>
+│   ├── <span style="color:var(--yellow);">execution_manager.py</span> <span style="color:var(--muted);font-size:11px;"># Module 4</span><br/>
+│   └── <span style="color:var(--orange);">results_analyzer.py</span> <span style="color:var(--muted);font-size:11px;"># Module 5</span><br/>
+├── <span style="color:var(--muted);">tools/</span><br/>
+│   ├── <span style="color:var(--teal);">mcp_client.py</span>       <span style="color:var(--muted);font-size:11px;"># LangChain wrappers</span><br/>
+│   └── <span style="color:var(--teal);">qiskit_tools.py</span>     <span style="color:var(--muted);font-size:11px;"># Qiskit helpers</span><br/>
+└── <span style="color:var(--muted);">logs/</span>                   <span style="color:var(--muted);font-size:11px;"># Experiment JSON logs</span>
+      </div>
+    </div>
+
+    <div class="card" style="padding:24px;">
+      <div style="font-size:13px;font-weight:700;margin-bottom:16px;">How to Run</div>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:8px;font-weight:600;">1. Install dependencies</div>
+      <div class="code-block" style="margin-bottom:14px;">pip install -r requirements.txt</div>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:8px;font-weight:600;">2. Set environment variables</div>
+      <div class="code-block" style="margin-bottom:14px;">cp .env.example .env<br/><span style="color:var(--muted)"># Fill ANTHROPIC_API_KEY, IBM_QUANTUM_TOKEN</span></div>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:8px;font-weight:600;">3. Launch Streamlit UI</div>
+      <div class="code-block" style="margin-bottom:14px;">streamlit run app.py</div>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:8px;font-weight:600;">4. Or run from CLI</div>
+      <div class="code-block">python agents/graph.py <span style="color:var(--str)">"Select 2 from [A,B,C]"</span></div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════
+     10. TECHNOLOGY STACK
+═══════════════════════════════════════════════════════ -->
+<div class="section">
+  <div class="section-title">
+    <div class="icon" style="background:rgba(63,185,80,0.15)">🛠️</div>
+    Technology Stack
+  </div>
+
+  <div class="card-grid cols-3" style="row-gap:16px;">
+    <div class="card">
+      <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1px;color:var(--blue);margin-bottom:12px;">Orchestration</div>
+      <div class="tech-row">
+        <div class="tech-badge">🧠 LangGraph <span class="version">≥0.1</span></div>
+        <div class="tech-badge">⛓ LangChain <span class="version">≥0.2</span></div>
+        <div class="tech-badge">🤖 claude-opus-4-6</div>
+        <div class="tech-badge">🔌 MCP SDK <span class="version">≥1.0</span></div>
+      </div>
+    </div>
+    <div class="card">
+      <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1px;color:var(--green);margin-bottom:12px;">Quantum Stack</div>
+      <div class="tech-row">
+        <div class="tech-badge">⚛️ Qiskit <span class="version">≥1.0</span></div>
+        <div class="tech-badge">📐 qiskit-optimization</div>
+        <div class="tech-badge">🖥️ qiskit-aer</div>
+        <div class="tech-badge">☁️ qiskit-ibm-runtime</div>
+      </div>
+    </div>
+    <div class="card">
+      <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1px;color:var(--orange);margin-bottom:12px;">Classical / UI</div>
+      <div class="tech-row">
+        <div class="tech-badge">📊 Streamlit <span class="version">≥1.35</span></div>
+        <div class="tech-badge">📉 Matplotlib</div>
+        <div class="tech-badge">🔢 NumPy</div>
+        <div class="tech-badge">🔬 SciPy COBYLA</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════
+     11. SUCCESS METRICS
+═══════════════════════════════════════════════════════ -->
+<div class="section">
+  <div class="section-title">
+    <div class="icon" style="background:rgba(210,153,34,0.15)">🎯</div>
+    Success Metrics
+  </div>
+
+  <div class="card-grid cols-4">
+    <div class="card" style="border-color:rgba(88,166,255,0.3);">
+      <div style="font-size:24px;margin-bottom:8px;">📐</div>
+      <div style="font-size:13px;font-weight:700;color:var(--blue);margin-bottom:6px;">Formulation Accuracy</div>
+      <div style="font-size:12px;color:var(--muted);">% of queries resulting in a mathematically valid QUBO with correctly penalised constraints</div>
+    </div>
+    <div class="card" style="border-color:rgba(63,185,80,0.3);">
+      <div style="font-size:24px;margin-bottom:8px;">✅</div>
+      <div style="font-size:13px;font-weight:700;color:var(--green);margin-bottom:6px;">Constraint Satisfaction</div>
+      <div style="font-size:12px;color:var(--muted);">% of top quantum solutions that satisfy all hard constraints (e.g. cardinality, budget)</div>
+    </div>
+    <div class="card" style="border-color:rgba(188,140,255,0.3);">
+      <div style="font-size:24px;margin-bottom:8px;">🤖</div>
+      <div style="font-size:13px;font-weight:700;color:var(--purple);margin-bottom:6px;">Agent Autonomy</div>
+      <div style="font-size:12px;color:var(--muted);">System's ability to recover from errors (IBM→Aer fallback) without user intervention</div>
+    </div>
+    <div class="card" style="border-color:rgba(210,153,34,0.3);">
+      <div style="font-size:24px;margin-bottom:8px;">🔬</div>
+      <div style="font-size:13px;font-weight:700;color:var(--yellow);margin-bottom:6px;">Hardware Awareness</div>
+      <div style="font-size:12px;color:var(--muted);">System correctly rejects problems too large for available QPU tier (qubit count &amp; depth checks)</div>
+    </div>
+  </div>
+</div>
+
+</div><!-- /container -->
+
+<footer>
+  <div>
+    <strong>Agentic Quantum Optimization Copilot</strong> · Architecture Reference v1.0
+  </div>
+  <div>Kondapi Sri Pranav · Reg. 2300030848 · LangGraph + MCP + Qiskit</div>
+</footer>
+
+</body>
+</html>
