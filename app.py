@@ -538,223 +538,225 @@ if parsed.get("clarification_needed"):
 
 st.success("Optimization complete")
 
-    # ── Section 1: Parsed Problem ─────────────────────────────────────────────
-    section("01  ·  Parsed Problem")
-    assets_list = parsed.get("assets", [])
-    metric_row([
-        {"label": "Assets",      "value": len(assets_list),                         "color": "accent"},
-        {"label": "Objective",   "value": parsed.get("objective","—").capitalize(),  "color": ""},
-        {"label": "Select k",    "value": parsed.get("num_select", "—"),             "color": ""},
-        {"label": "Constraints", "value": len(parsed.get("hard_constraints", [])),   "color": ""},
-    ])
+# ── Section 1: Parsed Problem ─────────────────────────────────────────────────
+section("01  ·  Parsed Problem")
+assets_list = parsed.get("assets", [])
+metric_row([
+    {"label": "Assets",      "value": len(assets_list),                         "color": "accent"},
+    {"label": "Objective",   "value": parsed.get("objective","—").capitalize(),  "color": ""},
+    {"label": "Select k",    "value": parsed.get("num_select", "—"),             "color": ""},
+    {"label": "Constraints", "value": len(parsed.get("hard_constraints", [])),   "color": ""},
+])
 
-    if assets_list:
-        weights = parsed.get("objective_weights", {})
-        pills = " ".join(
-            f'<span style="display:inline-flex;align-items:center;gap:.3rem;'
-            f'background:#f5f3ff;border:1px solid #ddd6fe;color:#5b21b6;'
-            f'border-radius:7px;padding:.2rem .65rem;font-size:.76rem;font-weight:500;">'
-            f'{a}<span style="color:#9d8fc0;font-weight:400;">{weights.get(a,"")}</span></span>'
-            for a in sorted(assets_list, key=lambda x: weights.get(x, 0), reverse=True)
-        )
-        st.markdown(
-            f'<div style="margin-top:.75rem;display:flex;flex-wrap:wrap;gap:.4rem;">{pills}</div>',
-            unsafe_allow_html=True,
-        )
+if assets_list:
+    weights = parsed.get("objective_weights", {})
+    pills = " ".join(
+        f'<span style="display:inline-flex;align-items:center;gap:.3rem;'
+        f'background:#f5f3ff;border:1px solid #ddd6fe;color:#5b21b6;'
+        f'border-radius:7px;padding:.2rem .65rem;font-size:.76rem;font-weight:500;">'
+        f'{a}<span style="color:#9d8fc0;font-weight:400;">{weights.get(a,"")}</span></span>'
+        for a in sorted(assets_list, key=lambda x: weights.get(x, 0), reverse=True)
+    )
+    st.markdown(
+        f'<div style="margin-top:.75rem;display:flex;flex-wrap:wrap;gap:.4rem;">{pills}</div>',
+        unsafe_allow_html=True,
+    )
 
-    with st.expander("View structured JSON"):
-        st.json({k: v for k, v in parsed.items() if k != "clarification_question"})
+with st.expander("View structured JSON"):
+    st.json({k: v for k, v in parsed.items() if k != "clarification_question"})
 
-    # ── Section 2: QUBO Matrix ────────────────────────────────────────────────
-    section("02  ·  QUBO Matrix")
-    qubo_matrix = result.get("qubo_matrix")
-    if qubo_matrix:
-        Q = np.array(qubo_matrix)
-        n = Q.shape[0]
-        labels = parsed.get("assets", [str(i) for i in range(n)])
+# ── Section 2: QUBO Matrix ────────────────────────────────────────────────────
+section("02  ·  QUBO Matrix")
+qubo_matrix = result.get("qubo_matrix")
+if qubo_matrix:
+    Q = np.array(qubo_matrix)
+    n = Q.shape[0]
+    labels = parsed.get("assets", [str(i) for i in range(n)])
 
-        col_heat, col_stats = st.columns([3, 1])
-        with col_heat:
-            sz = min(max(n, 4), 9)
-            fig_q, ax_q = plt.subplots(figsize=(sz, sz))
-            im = ax_q.imshow(Q, cmap="PuRd", aspect="auto")
-            ax_q.set_xticks(range(len(labels)))
-            ax_q.set_yticks(range(len(labels)))
-            ax_q.set_xticklabels(labels, rotation=45, ha="right", fontsize=9)
-            ax_q.set_yticklabels(labels, fontsize=9)
-            cb = plt.colorbar(im, ax=ax_q, fraction=0.046, pad=0.04)
-            cb.ax.tick_params(labelsize=8, colors="#7a7391")
-            cb.outline.set_edgecolor("#ddd6fe")
-            ax_q.set_title("QUBO Coefficient Matrix", fontsize=11, pad=10)
-            for sp in ax_q.spines.values():
-                sp.set_edgecolor("#ddd6fe")
-            fig_q.tight_layout()
-            st.pyplot(fig_q, use_container_width=True)
-
-        with col_stats:
-            st.markdown("<br>", unsafe_allow_html=True)
-            for lbl, val in [
-                ("Variables", Q.shape[0]),
-                ("Non-zero",  int(np.count_nonzero(Q))),
-                ("Offset",    f"{result.get('qubo_offset', 0.0):.3f}"),
-                ("Qubits",    result.get("num_qubits", "—")),
-            ]:
-                st.markdown(
-                    f'<div class="metric-card" style="margin-bottom:.55rem;">'
-                    f'<div class="metric-label">{lbl}</div>'
-                    f'<div class="metric-value" style="font-size:1.15rem;">{val}</div>'
-                    f'</div>',
-                    unsafe_allow_html=True,
-                )
-
-    # ── Section 3: QAOA Circuit ───────────────────────────────────────────────
-    section("03  ·  QAOA Circuit")
-    feasible = result.get("transpilation_feasible")
-    depth    = result.get("circuit_depth") or 0
-    metric_row([
-        {"label": "Qubits",        "value": result.get("num_qubits", "—"),   "color": "accent"},
-        {"label": "Circuit Depth", "value": depth,                            "color": "amber" if depth > 100 else "green"},
-        {"label": "Parameters",    "value": result.get("num_parameters","—"), "color": ""},
-        {"label": "Transpilation", "value": "Pass" if feasible else "Fail",   "color": "green" if feasible else "red"},
-    ])
-    if result.get("circuit_qasm"):
-        with st.expander("View OpenQASM 3 source"):
-            st.code(result["circuit_qasm"], language="text")
-
-    # ── Section 4: Hybrid Execution ───────────────────────────────────────────
-    section("04  ·  Hybrid Execution  ·  COBYLA + QAOA")
-    conv = result.get("convergence_history", [])
-    metric_row([
-        {"label": "Optimal Energy ⟨H⟩", "value": f"{result.get('optimal_energy', 0.0):.5f}", "color": "accent"},
-        {"label": "Backend",             "value": result.get("backend_name", "—"),             "color": ""},
-        {"label": "COBYLA Iterations",   "value": len(conv),                                   "color": ""},
-    ])
-
-    sol      = result.get("final_solution", {}) or {}
-    conv_fig = sol.get("_convergence_fig")
-
-    if conv_fig:
-        style_figure(conv_fig, accent="#6d28d9")
-        st.pyplot(conv_fig, use_container_width=True)
-    elif conv:
-        fig_c, ax_c = plt.subplots(figsize=(10, 3.2))
-        ax_c.plot(range(1, len(conv) + 1), conv, color="#6d28d9", linewidth=2)
-        ax_c.fill_between(range(1, len(conv) + 1), conv, alpha=0.08, color="#6d28d9")
-        ax_c.set_xlabel("Iteration")
-        ax_c.set_ylabel("⟨H⟩")
-        ax_c.set_title("Optimization Convergence")
-        ax_c.grid(True, color="#ede9fe", linewidth=0.5)
-        for sp in ax_c.spines.values():
+    col_heat, col_stats = st.columns([3, 1])
+    with col_heat:
+        sz = min(max(n, 4), 9)
+        fig_q, ax_q = plt.subplots(figsize=(sz, sz))
+        im = ax_q.imshow(Q, cmap="PuRd", aspect="auto")
+        ax_q.set_xticks(range(len(labels)))
+        ax_q.set_yticks(range(len(labels)))
+        ax_q.set_xticklabels(labels, rotation=45, ha="right", fontsize=9)
+        ax_q.set_yticklabels(labels, fontsize=9)
+        cb = plt.colorbar(im, ax=ax_q, fraction=0.046, pad=0.04)
+        cb.ax.tick_params(labelsize=8, colors="#7a7391")
+        cb.outline.set_edgecolor("#ddd6fe")
+        ax_q.set_title("QUBO Coefficient Matrix", fontsize=11, pad=10)
+        for sp in ax_q.spines.values():
             sp.set_edgecolor("#ddd6fe")
-        fig_c.tight_layout()
-        st.pyplot(fig_c, use_container_width=True)
+        fig_q.tight_layout()
+        st.pyplot(fig_q, use_container_width=True)
 
-    # ── Section 5: Results ────────────────────────────────────────────────────
-    section("05  ·  Optimization Results")
-    if sol:
-        selected      = sol.get("selected_assets", [])
-        obj_val       = sol.get("objective_value", 0)
-        constraint_ok = sol.get("constraint_satisfied", False)
-        approx_ratio  = sol.get("approximation_ratio", 0)
-        classical     = sol.get("classical_optimum_selection", [])
-        classical_val = sol.get("classical_optimum_value")
-
-        badge = (
-            '<span class="badge badge-green">Constraints satisfied</span>'
-            if constraint_ok else
-            '<span class="badge badge-red">Constraints violated</span>'
-        )
-        st.markdown(
-            f'<div class="result-hero">'
-            f'<div class="result-hero-label">Optimal Portfolio</div>'
-            f'<div class="result-hero-assets">{" · ".join(selected) if selected else "No solution found"}</div>'
-            f'<div class="result-hero-sub" style="margin-bottom:.7rem;">'
-            f'Objective value: <strong style="color:#4c1d95;">{obj_val:.4f}</strong></div>'
-            f'{badge}'
-            f'</div>',
-            unsafe_allow_html=True,
-        )
-
-        ratio_color = "green" if approx_ratio >= 0.95 else "amber" if approx_ratio >= 0.8 else "red"
-        metric_row([
-            {"label": "Objective Value",     "value": f"{obj_val:.4f}",                                         "color": "accent"},
-            {"label": "Approximation Ratio", "value": f"{approx_ratio:.3f}",                                    "color": ratio_color},
-            {"label": "Total Shots",         "value": sol.get("total_shots", 1024),                             "color": ""},
-            {"label": "Classical Optimum",   "value": f"{classical_val:.4f}" if classical_val else "—",         "color": ""},
-        ])
-
-        if classical:
+    with col_stats:
+        st.markdown("<br>", unsafe_allow_html=True)
+        for lbl, val in [
+            ("Variables", Q.shape[0]),
+            ("Non-zero",  int(np.count_nonzero(Q))),
+            ("Offset",    f"{result.get('qubo_offset', 0.0):.3f}"),
+            ("Qubits",    result.get("num_qubits", "—")),
+        ]:
             st.markdown(
-                f'<div class="info-box" style="margin-top:.75rem;">'
-                f'Classical brute-force optimum: '
-                f'<strong style="color:#4c1d95;">{", ".join(classical)}</strong>'
-                f' (value = {f"{classical_val:.4f}" if classical_val else "N/A"})'
+                f'<div class="metric-card" style="margin-bottom:.55rem;">'
+                f'<div class="metric-label">{lbl}</div>'
+                f'<div class="metric-value" style="font-size:1.15rem;">{val}</div>'
                 f'</div>',
                 unsafe_allow_html=True,
             )
 
-        hist_fig = sol.get("_histogram_fig")
-        if hist_fig:
-            st.markdown("<div style='height:.6rem'></div>", unsafe_allow_html=True)
-            style_figure(hist_fig, accent="#6d28d9", bar_color="#8b5cf6")
-            st.pyplot(hist_fig, use_container_width=True)
+# ── Section 3: QAOA Circuit ───────────────────────────────────────────────────
+section("03  ·  QAOA Circuit")
+feasible = result.get("transpilation_feasible")
+depth    = result.get("circuit_depth") or 0
+metric_row([
+    {"label": "Qubits",        "value": result.get("num_qubits", "—"),   "color": "accent"},
+    {"label": "Circuit Depth", "value": depth,                            "color": "amber" if depth > 100 else "green"},
+    {"label": "Parameters",    "value": result.get("num_parameters","—"), "color": ""},
+    {"label": "Transpilation", "value": "Pass" if feasible else "Fail",   "color": "green" if feasible else "red"},
+])
+if result.get("circuit_qasm"):
+    with st.expander("View OpenQASM 3 source"):
+        st.code(result["circuit_qasm"], language="text")
 
-        candidates = sol.get("top_candidates", [])
-        if candidates:
-            st.markdown("<div style='height:.4rem'></div>", unsafe_allow_html=True)
-            rows = "".join(
-                f'<tr>'
-                f'<td><code style="background:#f5f3ff;padding:.15rem .4rem;border-radius:5px;'
-                f'font-size:.74rem;color:#5b21b6;">{c["bitstring"]}</code></td>'
-                f'<td style="font-weight:500;">{", ".join(c["selection"]) or "—"}</td>'
-                f'<td>{c["probability"]:.4f}</td>'
-                f'<td>{c["objective_value"]:.4f}</td>'
-                f'<td>{"<span class=\'badge badge-green\'>✓</span>" if c["constraint_satisfied"] else "<span class=\'badge badge-red\'>✗</span>"}</td>'
-                f'</tr>'
-                for c in candidates
-            )
-            st.markdown(
-                f'<div style="border:1px solid #ddd6fe;border-radius:12px;overflow:hidden;margin-top:.5rem;">'
-                f'<table class="styled-table">'
-                f'<thead><tr><th>Bitstring</th><th>Selected Assets</th>'
-                f'<th>Probability</th><th>Objective</th><th>Constraints</th></tr></thead>'
-                f'<tbody>{rows}</tbody>'
-                f'</table></div>',
-                unsafe_allow_html=True,
-            )
+# ── Section 4: Hybrid Execution ───────────────────────────────────────────────
+section("04  ·  Hybrid Execution  ·  COBYLA + QAOA")
+conv = result.get("convergence_history", [])
+metric_row([
+    {"label": "Optimal Energy ⟨H⟩", "value": f"{result.get('optimal_energy', 0.0):.5f}", "color": "accent"},
+    {"label": "Backend",             "value": result.get("backend_name", "—"),             "color": ""},
+    {"label": "COBYLA Iterations",   "value": len(conv),                                   "color": ""},
+])
 
-    # ── Section 6: Log ────────────────────────────────────────────────────────
-    section("06  ·  Experiment Log")
-    logs = result.get("logs", [])
-    with st.expander(f"{len(logs)} log entries"):
-        _colors = {
-            "[intake":    "#6d28d9",
-            "[qubo":      "#7c3aed",
-            "[circuit":   "#0369a1",
-            "[execution": "#b45309",
-            "[results":   "#065f46",
-            "[handle":    "#dc2626",
-        }
-        rows_html = "".join(
-            f'<div style="font-size:.72rem;color:{next((v for k,v in _colors.items() if k in l),"#7a7391")};'
-            f'padding:.12rem 0;border-bottom:1px solid #f3f0ff;'
-            f'font-family:\'JetBrains Mono\',monospace;">{l}</div>'
-            for l in logs
-        )
+sol      = result.get("final_solution", {}) or {}
+conv_fig = sol.get("_convergence_fig")
+
+if conv_fig:
+    style_figure(conv_fig, accent="#6d28d9")
+    st.pyplot(conv_fig, use_container_width=True)
+elif conv:
+    fig_c, ax_c = plt.subplots(figsize=(10, 3.2))
+    ax_c.plot(range(1, len(conv) + 1), conv, color="#6d28d9", linewidth=2)
+    ax_c.fill_between(range(1, len(conv) + 1), conv, alpha=0.08, color="#6d28d9")
+    ax_c.set_xlabel("Iteration")
+    ax_c.set_ylabel("⟨H⟩")
+    ax_c.set_title("Optimization Convergence")
+    ax_c.grid(True, color="#ede9fe", linewidth=0.5)
+    for sp in ax_c.spines.values():
+        sp.set_edgecolor("#ddd6fe")
+    fig_c.tight_layout()
+    st.pyplot(fig_c, use_container_width=True)
+
+# ── Section 5: Results ────────────────────────────────────────────────────────
+section("05  ·  Optimization Results")
+if sol:
+    selected      = sol.get("selected_assets", [])
+    obj_val       = sol.get("objective_value", 0)
+    constraint_ok = sol.get("constraint_satisfied", False)
+    approx_ratio  = sol.get("approximation_ratio", 0)
+    classical     = sol.get("classical_optimum_selection", [])
+    classical_val = sol.get("classical_optimum_value")
+
+    badge = (
+        '<span class="badge badge-green">Constraints satisfied</span>'
+        if constraint_ok else
+        '<span class="badge badge-red">Constraints violated</span>'
+    )
+    st.markdown(
+        f'<div class="result-hero">'
+        f'<div class="result-hero-label">Optimal Portfolio</div>'
+        f'<div class="result-hero-assets">{" · ".join(selected) if selected else "No solution found"}</div>'
+        f'<div class="result-hero-sub" style="margin-bottom:.7rem;">'
+        f'Objective value: <strong style="color:#4c1d95;">{obj_val:.4f}</strong></div>'
+        f'{badge}'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+
+    ratio_color = "green" if approx_ratio >= 0.95 else "amber" if approx_ratio >= 0.8 else "red"
+    metric_row([
+        {"label": "Objective Value",     "value": f"{obj_val:.4f}",                                         "color": "accent"},
+        {"label": "Approximation Ratio", "value": f"{approx_ratio:.3f}",                                    "color": ratio_color},
+        {"label": "Total Shots",         "value": sol.get("total_shots", 1024),                             "color": ""},
+        {"label": "Classical Optimum",   "value": f"{classical_val:.4f}" if classical_val else "—",         "color": ""},
+    ])
+
+    if classical:
         st.markdown(
-            f'<div style="background:#faf8ff;border:1px solid #ede9fe;border-radius:10px;'
-            f'padding:.75rem;max-height:280px;overflow-y:auto;">{rows_html}</div>',
+            f'<div class="info-box" style="margin-top:.75rem;">'
+            f'Classical brute-force optimum: '
+            f'<strong style="color:#4c1d95;">{", ".join(classical)}</strong>'
+            f' (value = {f"{classical_val:.4f}" if classical_val else "N/A"})'
+            f'</div>',
             unsafe_allow_html=True,
         )
 
-    log_json = json.dumps(
-        {k: v for k, v in result.items() if k not in ("ising_hamiltonian", "final_solution")},
-        default=str, indent=2,
+    hist_fig = sol.get("_histogram_fig")
+    if hist_fig:
+        st.markdown("<div style='height:.6rem'></div>", unsafe_allow_html=True)
+        style_figure(hist_fig, accent="#6d28d9", bar_color="#8b5cf6")
+        st.pyplot(hist_fig, use_container_width=True)
+
+    candidates = sol.get("top_candidates", [])
+    if candidates:
+        st.markdown("<div style='height:.4rem'></div>", unsafe_allow_html=True)
+        _ok_badge  = "<span class='badge badge-green'>✓</span>"
+        _fail_badge = "<span class='badge badge-red'>✗</span>"
+        rows = "".join(
+            f'<tr>'
+            f'<td><code style="background:#f5f3ff;padding:.15rem .4rem;border-radius:5px;'
+            f'font-size:.74rem;color:#5b21b6;">{c["bitstring"]}</code></td>'
+            f'<td style="font-weight:500;">{", ".join(c["selection"]) or "—"}</td>'
+            f'<td>{c["probability"]:.4f}</td>'
+            f'<td>{c["objective_value"]:.4f}</td>'
+            f'<td>{_ok_badge if c["constraint_satisfied"] else _fail_badge}</td>'
+            f'</tr>'
+            for c in candidates
+        )
+        st.markdown(
+            f'<div style="border:1px solid #ddd6fe;border-radius:12px;overflow:hidden;margin-top:.5rem;">'
+            f'<table class="styled-table">'
+            f'<thead><tr><th>Bitstring</th><th>Selected Assets</th>'
+            f'<th>Probability</th><th>Objective</th><th>Constraints</th></tr></thead>'
+            f'<tbody>{rows}</tbody>'
+            f'</table></div>',
+            unsafe_allow_html=True,
+        )
+
+# ── Section 6: Log ────────────────────────────────────────────────────────────
+section("06  ·  Experiment Log")
+logs = result.get("logs", [])
+with st.expander(f"{len(logs)} log entries"):
+    _colors = {
+        "[intake":    "#6d28d9",
+        "[qubo":      "#7c3aed",
+        "[circuit":   "#0369a1",
+        "[execution": "#b45309",
+        "[results":   "#065f46",
+        "[handle":    "#dc2626",
+    }
+    rows_html = "".join(
+        f'<div style="font-size:.72rem;color:{next((v for k,v in _colors.items() if k in l),"#7a7391")};'
+        f'padding:.12rem 0;border-bottom:1px solid #f3f0ff;'
+        f'font-family:\'JetBrains Mono\',monospace;">{l}</div>'
+        for l in logs
     )
-    st.download_button(
-        "Download Experiment Log (JSON)",
-        data=log_json,
-        file_name="quantum_experiment_log.json",
-        mime="application/json",
-        use_container_width=True,
+    st.markdown(
+        f'<div style="background:#faf8ff;border:1px solid #ede9fe;border-radius:10px;'
+        f'padding:.75rem;max-height:280px;overflow-y:auto;">{rows_html}</div>',
+        unsafe_allow_html=True,
     )
+
+log_json = json.dumps(
+    {k: v for k, v in result.items() if k not in ("ising_hamiltonian", "final_solution")},
+    default=str, indent=2,
+)
+st.download_button(
+    "Download Experiment Log (JSON)",
+    data=log_json,
+    file_name="quantum_experiment_log.json",
+    mime="application/json",
+    use_container_width=True,
+)
