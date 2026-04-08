@@ -78,12 +78,23 @@ def _get_aer_backend():
     return AerSimulator()
 
 
+def _runtime_channel() -> str:
+    """Normalize legacy channel names to the current Qiskit Runtime values."""
+    channel = os.getenv("IBM_QUANTUM_CHANNEL", "ibm_quantum_platform").strip()
+    if channel == "ibm_quantum":
+        return "ibm_quantum_platform"
+    return channel or "ibm_quantum_platform"
+
+
 def _get_ibm_backend(name: str):
     """Connect to a real IBM Quantum machine using the token from the .env file."""
     from qiskit_ibm_runtime import QiskitRuntimeService
+    token = os.getenv("IBM_QUANTUM_TOKEN")
+    if not token:
+        raise RuntimeError("IBM_QUANTUM_TOKEN is not configured.")
     service = QiskitRuntimeService(
-        channel=os.getenv("IBM_QUANTUM_CHANNEL", "ibm_quantum"),
-        token=os.getenv("IBM_QUANTUM_TOKEN"),
+        channel=_runtime_channel(),
+        token=token,
     )
     return service.backend(name)
 
@@ -93,16 +104,11 @@ def _resolve_backend(backend_name: str):
     Return the appropriate Qiskit backend object and a label ("local" or "ibm").
 
     If the name is "aer_simulator" (or empty), use the local simulator.
-    If the name is an IBM backend (e.g. "ibm_brisbane"), try to connect to IBM.
-    If IBM is unreachable, fall back to the local simulator automatically.
+    If the name is an IBM backend (e.g. "ibm_brisbane"), require a real IBM backend.
     """
     if backend_name in ("aer_simulator", "local", "", None):
         return _get_aer_backend(), "local"
-    try:
-        return _get_ibm_backend(backend_name), "ibm"
-    except Exception as exc:
-        logger.warning(f"IBM backend '{backend_name}' unavailable ({exc}), using AerSimulator.")
-        return _get_aer_backend(), "local"
+    return _get_ibm_backend(backend_name), "ibm"
 
 
 def _load_circuit(circuit_qasm: str):
@@ -258,14 +264,14 @@ async def _run_qaoa_sampler(
             counts_raw = result[0].data.meas.get_counts()
             counts = {k: int(v) for k, v in counts_raw.items()}
         else:
-            # Run on IBM Quantum hardware (requires account + queue wait)
-            from qiskit_ibm_runtime import SamplerV2, Session
-            with Session(backend=backend) as session:
-                sampler = SamplerV2(session=session)
-                job = sampler.run([bound], shots=shots)
-                result = job.result()
-                counts_raw = result[0].data.meas.get_counts()
-                counts = {k: int(v) for k, v in counts_raw.items()}
+            # Run on IBM Quantum hardware using job mode (no Session required).
+            # Session is a paid feature — the Open Plan only supports individual jobs.
+            from qiskit_ibm_runtime import SamplerV2
+            sampler = SamplerV2(backend=backend)
+            job = sampler.run([bound], shots=shots)
+            result = job.result()
+            counts_raw = result[0].data.meas.get_counts()
+            counts = {k: int(v) for k, v in counts_raw.items()}
 
         # Return results as a JSON string wrapped in TextContent (MCP format)
         return [TextContent(type="text", text=json.dumps({
@@ -317,13 +323,13 @@ async def _run_estimator(
             # .evs = expectation values (a single float for one observable)
             ev = float(result[0].data.evs)
         else:
-            from qiskit_ibm_runtime import EstimatorV2, Session
-            with Session(backend=backend) as session:
-                estimator = EstimatorV2(session=session)
-                pub = (circuit, observable, params)
-                job = estimator.run([pub])
-                result = job.result()
-                ev = float(result[0].data.evs)
+            # Use job mode — no Session required on the IBM Open Plan.
+            from qiskit_ibm_runtime import EstimatorV2
+            estimator = EstimatorV2(backend=backend)
+            pub = (circuit, observable, params)
+            job = estimator.run([pub])
+            result = job.result()
+            ev = float(result[0].data.evs)
 
         return [TextContent(type="text", text=json.dumps({
             "expectation_value": ev,   # The energy ⟨H⟩ — what COBYLA is minimizing
@@ -353,7 +359,7 @@ async def _list_backends() -> list[TextContent]:
         if token:
             # Connect to IBM Quantum and fetch all operational machines
             service = QiskitRuntimeService(
-                channel=os.getenv("IBM_QUANTUM_CHANNEL", "ibm_quantum"),
+                channel=_runtime_channel(),
                 token=token,
             )
             for backend in service.backends(operational=True):
