@@ -266,8 +266,9 @@ async def _run_qaoa_sampler(
         else:
             # Run on IBM Quantum hardware using job mode (no Session required).
             # Session is a paid feature — the Open Plan only supports individual jobs.
+            # IBM runtime primitives take mode= (a backend, session, or batch).
             from qiskit_ibm_runtime import SamplerV2
-            sampler = SamplerV2(backend=backend)
+            sampler = SamplerV2(mode=backend)
             job = sampler.run([bound], shots=shots)
             result = job.result()
             counts_raw = result[0].data.meas.get_counts()
@@ -324,8 +325,9 @@ async def _run_estimator(
             ev = float(result[0].data.evs)
         else:
             # Use job mode — no Session required on the IBM Open Plan.
+            # IBM runtime primitives take mode= (a backend, session, or batch).
             from qiskit_ibm_runtime import EstimatorV2
-            estimator = EstimatorV2(backend=backend)
+            estimator = EstimatorV2(mode=backend)
             pub = (circuit, observable, params)
             job = estimator.run([pub])
             result = job.result()
