@@ -16,6 +16,37 @@ Run with:
 The server speaks stdio-based MCP by default (suitable for subprocess transport).
 """
 
+# ──────────────────────────────────────────────────────────────────────────────
+# WHAT IS THIS FILE?
+#
+# This file is a standalone server that exposes 4 quantum tools over the
+# MCP (Model Context Protocol). It runs as a SUBPROCESS — meaning the main app
+# launches it in the background and communicates with it via stdin/stdout pipes.
+#
+# WHY A SEPARATE SERVER?
+#   - Keeps quantum execution isolated from the main Python process
+#   - MCP is a standard protocol, so other AI tools can also call these tools
+#   - The subprocess can be restarted independently if it crashes
+#
+# HOW DOES COMMUNICATION WORK?
+#   main app (execution_manager.py)
+#       ↓  calls _call_mcp_tool("run_estimator", {...})
+#   mcp_client.py
+#       ↓  launches this script as a subprocess
+#       ↓  sends JSON-RPC message over stdin pipe
+#   mcp_server.py  ← THIS FILE
+#       ↓  receives the message, runs Qiskit code
+#       ↓  sends JSON result back over stdout pipe
+#   mcp_client.py
+#       ↓  returns the parsed result to execution_manager.py
+#
+# THE 4 TOOLS:
+#   1. run_qaoa_sampler  — measure the circuit many times → bitstring histogram
+#   2. run_estimator     — compute ⟨H⟩ (energy) for one parameter setting
+#   3. list_backends     — list available quantum backends
+#   4. validate_circuit  — check if a circuit fits on a given backend
+# ──────────────────────────────────────────────────────────────────────────────
+
 from __future__ import annotations
 
 import asyncio
@@ -33,19 +64,22 @@ load_dotenv()
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
 logger = logging.getLogger(__name__)
 
+# Create the MCP server instance with a name identifier
 app = Server("quantum-copilot")
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
+# ──────────────────────────────────────────────────────────────────────────────
+# BACKEND HELPERS
+# ──────────────────────────────────────────────────────────────────────────────
 
 def _get_aer_backend():
+    """Return a local Qiskit AerSimulator (runs on your CPU, no account needed)."""
     from qiskit_aer import AerSimulator
     return AerSimulator()
 
 
 def _get_ibm_backend(name: str):
+    """Connect to a real IBM Quantum machine using the token from the .env file."""
     from qiskit_ibm_runtime import QiskitRuntimeService
     service = QiskitRuntimeService(
         channel=os.getenv("IBM_QUANTUM_CHANNEL", "ibm_quantum"),
@@ -55,6 +89,13 @@ def _get_ibm_backend(name: str):
 
 
 def _resolve_backend(backend_name: str):
+    """
+    Return the appropriate Qiskit backend object and a label ("local" or "ibm").
+
+    If the name is "aer_simulator" (or empty), use the local simulator.
+    If the name is an IBM backend (e.g. "ibm_brisbane"), try to connect to IBM.
+    If IBM is unreachable, fall back to the local simulator automatically.
+    """
     if backend_name in ("aer_simulator", "local", "", None):
         return _get_aer_backend(), "local"
     try:
@@ -65,20 +106,35 @@ def _resolve_backend(backend_name: str):
 
 
 def _load_circuit(circuit_qasm: str):
-    """Parse an OpenQASM 3 string into a QuantumCircuit."""
+    """
+    Parse an OpenQASM 3 text string into a Qiskit QuantumCircuit object.
+
+    OpenQASM 3 is a text format for quantum circuits — like Python source code
+    for quantum programs. Qiskit's qasm3.loads() compiles it back into an object.
+    """
     from qiskit.qasm3 import loads as qasm3_loads
     return qasm3_loads(circuit_qasm)
 
 
 def _bind_params(circuit, params: list[float]):
-    """Bind a flat list of parameter values to the circuit's ParameterVector."""
+    """
+    Plug concrete numbers into the circuit's parameter "slots" (γ and β values).
+
+    A QAOA circuit has named parameters like θ[0], θ[1], etc.
+    This function replaces those placeholders with actual float values.
+    Sort by name to ensure consistent ordering.
+    """
     param_dict = dict(zip(sorted(circuit.parameters, key=lambda p: p.name), params))
     return circuit.assign_parameters(param_dict)
 
 
-# ---------------------------------------------------------------------------
-# Tool definitions
-# ---------------------------------------------------------------------------
+# ──────────────────────────────────────────────────────────────────────────────
+# TOOL DEFINITIONS
+# ──────────────────────────────────────────────────────────────────────────────
+# This function is called when the MCP client asks "what tools do you have?"
+# It returns a list of Tool objects that describe each tool's name, purpose,
+# and what inputs it accepts (as JSON Schema).
+# ──────────────────────────────────────────────────────────────────────────────
 
 @app.list_tools()
 async def list_tools() -> list[Tool]:
@@ -141,9 +197,12 @@ async def list_tools() -> list[Tool]:
     ]
 
 
-# ---------------------------------------------------------------------------
-# Tool handlers
-# ---------------------------------------------------------------------------
+# ──────────────────────────────────────────────────────────────────────────────
+# TOOL DISPATCH
+# ──────────────────────────────────────────────────────────────────────────────
+# When the MCP client calls a tool, this function receives the tool name
+# and its arguments, then routes to the appropriate implementation below.
+# ──────────────────────────────────────────────────────────────────────────────
 
 @app.call_tool()
 async def call_tool(name: str, arguments: dict) -> list[TextContent]:
@@ -159,6 +218,14 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         return [TextContent(type="text", text=json.dumps({"error": f"Unknown tool: {name}"}))]
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# TOOL 1: run_qaoa_sampler
+# ──────────────────────────────────────────────────────────────────────────────
+# This is the FINAL measurement step.
+# After COBYLA found the best parameters, we run the circuit many times
+# and count how often each bitstring appears.
+# ──────────────────────────────────────────────────────────────────────────────
+
 async def _run_qaoa_sampler(
     circuit_qasm: str,
     params: list[float],
@@ -168,22 +235,30 @@ async def _run_qaoa_sampler(
     try:
         from qiskit_aer.primitives import SamplerV2 as AerSampler
 
+        # Parse the OpenQASM text back into a Qiskit circuit object
         circuit = _load_circuit(circuit_qasm)
+
+        # Plug the optimized parameters into the circuit's parameter slots
         bound = _bind_params(circuit, params)
-        # Only add measurements if the circuit doesn't already have them
+
+        # Add measurement gates at the end if not already present
+        # (We need measurements to get classical output from the quantum circuit)
         if not any(bound.count_ops().get(gate, 0) for gate in ("measure",)):
             bound.measure_all()
 
         backend, kind = _resolve_backend(backend_name)
 
         if kind == "local":
+            # Run on the local AerSimulator (fast, no network required)
             sampler = AerSampler()
             job = sampler.run([bound], shots=shots)
             result = job.result()
-            # AerSampler V2 result handling
+            # .data.meas gives access to the measurement register
+            # .get_counts() returns {"101": 312, "110": 289, ...}
             counts_raw = result[0].data.meas.get_counts()
             counts = {k: int(v) for k, v in counts_raw.items()}
         else:
+            # Run on IBM Quantum hardware (requires account + queue wait)
             from qiskit_ibm_runtime import SamplerV2, Session
             with Session(backend=backend) as session:
                 sampler = SamplerV2(session=session)
@@ -192,12 +267,24 @@ async def _run_qaoa_sampler(
                 counts_raw = result[0].data.meas.get_counts()
                 counts = {k: int(v) for k, v in counts_raw.items()}
 
-        return [TextContent(type="text", text=json.dumps({"counts": counts, "shots": shots, "backend": backend_name}))]
+        # Return results as a JSON string wrapped in TextContent (MCP format)
+        return [TextContent(type="text", text=json.dumps({
+            "counts": counts,       # The measurement histogram
+            "shots": shots,         # How many measurements were taken
+            "backend": backend_name,
+        }))]
 
     except Exception as exc:
         logger.error(f"run_qaoa_sampler error: {exc}")
         return [TextContent(type="text", text=json.dumps({"error": str(exc)}))]
 
+
+# ──────────────────────────────────────────────────────────────────────────────
+# TOOL 2: run_estimator
+# ──────────────────────────────────────────────────────────────────────────────
+# This is called HUNDREDS of times during the COBYLA optimization loop.
+# Each call evaluates the energy ⟨H⟩ for one specific set of parameters.
+# ──────────────────────────────────────────────────────────────────────────────
 
 async def _run_estimator(
     circuit_qasm: str,
@@ -209,21 +296,25 @@ async def _run_estimator(
         from qiskit.quantum_info import SparsePauliOp
         from qiskit_aer.primitives import EstimatorV2 as AerEstimator
 
+        # Parse the circuit from text
         circuit = _load_circuit(circuit_qasm)
 
-        # Deserialise the observable
+        # Reconstruct the Hamiltonian from its JSON representation
+        # observables is a JSON string like: '[["ZZ", -0.5], ["ZI", 0.25]]'
         obs_data = json.loads(observables)
-        paulis = [item[0] for item in obs_data]
-        coeffs = [item[1] for item in obs_data]
+        paulis = [item[0] for item in obs_data]   # ["ZZ", "ZI", ...]
+        coeffs = [item[1] for item in obs_data]   # [-0.5, 0.25, ...]
         observable = SparsePauliOp(paulis, coeffs=coeffs)
 
         backend, kind = _resolve_backend(backend_name)
 
         if kind == "local":
             estimator = AerEstimator()
+            # A "pub" (Primitive Unified Bloc) bundles circuit + observable + params
             pub = (circuit, observable, params)
             job = estimator.run([pub])
             result = job.result()
+            # .evs = expectation values (a single float for one observable)
             ev = float(result[0].data.evs)
         else:
             from qiskit_ibm_runtime import EstimatorV2, Session
@@ -234,19 +325,33 @@ async def _run_estimator(
                 result = job.result()
                 ev = float(result[0].data.evs)
 
-        return [TextContent(type="text", text=json.dumps({"expectation_value": ev, "backend": backend_name}))]
+        return [TextContent(type="text", text=json.dumps({
+            "expectation_value": ev,   # The energy ⟨H⟩ — what COBYLA is minimizing
+            "backend": backend_name,
+        }))]
 
     except Exception as exc:
         logger.error(f"run_estimator error: {exc}")
         return [TextContent(type="text", text=json.dumps({"error": str(exc)}))]
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# TOOL 3: list_backends
+# ──────────────────────────────────────────────────────────────────────────────
+# Returns a list of available quantum backends.
+# Always includes the local AerSimulator.
+# Adds IBM Quantum machines if IBM_QUANTUM_TOKEN is set in the .env file.
+# ──────────────────────────────────────────────────────────────────────────────
+
 async def _list_backends() -> list[TextContent]:
+    # Start with the local simulator (always available)
     backends_info = [{"name": "aer_simulator", "qubits": 32, "status": "available", "type": "local"}]
+
     try:
         from qiskit_ibm_runtime import QiskitRuntimeService
         token = os.getenv("IBM_QUANTUM_TOKEN")
         if token:
+            # Connect to IBM Quantum and fetch all operational machines
             service = QiskitRuntimeService(
                 channel=os.getenv("IBM_QUANTUM_CHANNEL", "ibm_quantum"),
                 token=token,
@@ -259,10 +364,18 @@ async def _list_backends() -> list[TextContent]:
                     "type": "ibm_quantum",
                 })
     except Exception as exc:
+        # If IBM is unreachable, just return the local simulator
         logger.warning(f"Could not fetch IBM Quantum backends: {exc}")
 
     return [TextContent(type="text", text=json.dumps({"backends": backends_info}))]
 
+
+# ──────────────────────────────────────────────────────────────────────────────
+# TOOL 4: validate_circuit
+# ──────────────────────────────────────────────────────────────────────────────
+# Compiles the circuit for the target backend and reports how big it is.
+# Used by circuit_constructor.py to check feasibility before execution.
+# ──────────────────────────────────────────────────────────────────────────────
 
 async def _validate_circuit(
     circuit_qasm: str,
@@ -271,15 +384,19 @@ async def _validate_circuit(
     try:
         from qiskit.transpiler.preset_passmanagers import generate_preset_pass_manager
 
+        # Parse the circuit and compile it for the target backend
         circuit = _load_circuit(circuit_qasm)
         backend, _ = _resolve_backend(backend_name)
         pm = generate_preset_pass_manager(optimization_level=1, backend=backend)
         transpiled = pm.run(circuit)
 
-        depth = transpiled.depth()
-        gate_count = sum(transpiled.count_ops().values())
-        num_qubits = transpiled.num_qubits
+        # Measure the compiled circuit
+        depth = transpiled.depth()                           # Number of sequential gate layers
+        gate_count = sum(transpiled.count_ops().values())    # Total number of gates
+        num_qubits = transpiled.num_qubits                   # Qubits used
         backend_qubits = backend.num_qubits if hasattr(backend, "num_qubits") else 127
+
+        # Feasible = fits on the hardware AND is shallow enough to run reliably
         feasible = (num_qubits <= backend_qubits) and (depth <= 200)
 
         return [TextContent(type="text", text=json.dumps({
@@ -295,11 +412,15 @@ async def _validate_circuit(
         return [TextContent(type="text", text=json.dumps({"error": str(exc)}))]
 
 
-# ---------------------------------------------------------------------------
-# Entry point
-# ---------------------------------------------------------------------------
+# ──────────────────────────────────────────────────────────────────────────────
+# ENTRY POINT
+# ──────────────────────────────────────────────────────────────────────────────
+# When this script is launched as a subprocess, it starts listening for
+# MCP messages on stdin and sends responses on stdout.
+# ──────────────────────────────────────────────────────────────────────────────
 
 async def main():
+    # stdio_server() sets up the stdin/stdout communication channels
     async with stdio_server() as (read_stream, write_stream):
         await app.run(read_stream, write_stream, app.create_initialization_options())
 

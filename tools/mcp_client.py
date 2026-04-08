@@ -8,6 +8,30 @@ Each tool launches the MCP server as a subprocess (stdio transport) and
 communicates with it via the MCP Python client.
 """
 
+# ──────────────────────────────────────────────────────────────────────────────
+# WHAT IS THIS FILE?
+#
+# This file is the BRIDGE between the main pipeline (execution_manager.py)
+# and the MCP server (mcp_server.py).
+#
+# It has two parts:
+#
+# PART 1: _call_mcp_tool() — the raw communication function
+#   This function:
+#   1. Launches mcp_server.py as a child subprocess
+#   2. Sends it a JSON-RPC message over stdin: "call tool X with args Y"
+#   3. Reads the JSON response from stdout
+#   4. Returns the parsed result as a Python dict
+#
+# PART 2: LangChain Tool classes (QAOASamplerTool, EstimatorTool, etc.)
+#   These wrap _call_mcp_tool() in LangChain's BaseTool format.
+#   This lets the LangGraph orchestrator discover and call them as
+#   standard "agent tools" if it ever needs to use them directly.
+#
+# In practice, execution_manager.py calls _call_mcp_tool() directly
+# (bypassing the LangChain wrapper) for simplicity.
+# ──────────────────────────────────────────────────────────────────────────────
+
 from __future__ import annotations
 
 import json
@@ -22,57 +46,75 @@ from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
-# Path to the MCP server script
+# Absolute path to the MCP server script so we can launch it as a subprocess
+# __file__ = this file (mcp_client.py), .parent.parent = project root
 _SERVER_PATH = Path(__file__).parent.parent / "mcp_server.py"
 
 
 def _call_mcp_tool(tool_name: str, arguments: dict) -> dict:
     """
-    Start the MCP server subprocess and call a single tool via stdin/stdout.
-    Returns the parsed JSON result.
+    Launch the MCP server and call one tool on it. Returns the result as a dict.
 
-    Handles both standalone execution and running inside an existing event loop
-    (e.g. Streamlit, Jupyter) by detecting the loop state and using the
-    appropriate strategy.
+    HOW IT WORKS:
+      1. Spawn mcp_server.py as a child process using sys.executable (same Python)
+      2. Connect to it via MCP's stdio client (stdin/stdout pipes)
+      3. Send a "call_tool" request: { name: tool_name, arguments: {...} }
+      4. Read the JSON response from the server
+      5. Return the parsed Python dict
+
+    TRICKY PART — Async vs. Sync:
+      MCP uses async Python (asyncio). But Streamlit runs its own event loop.
+      If we call asyncio.run() while Streamlit's loop is running → RuntimeError.
+      Solution: detect if a loop is already running, and if so, use a background
+      thread (ThreadPoolExecutor) to run our async code in a separate loop.
     """
     try:
         import asyncio
         from mcp import ClientSession, StdioServerParameters
         from mcp.client.stdio import stdio_client
 
+        # Tell MCP how to start the server: run "python mcp_server.py"
         server_params = StdioServerParameters(
-            command=sys.executable,
-            args=[str(_SERVER_PATH)],
+            command=sys.executable,     # The current Python interpreter
+            args=[str(_SERVER_PATH)],   # Path to mcp_server.py
         )
 
         async def _run():
+            """The actual async communication logic."""
             async with stdio_client(server_params) as (read, write):
+                # Establish an MCP session over the stdin/stdout pipes
                 async with ClientSession(read, write) as session:
-                    await session.initialize()
+                    await session.initialize()   # MCP handshake
+
+                    # Call the tool and wait for the response
                     result = await session.call_tool(tool_name, arguments)
-                    # result.content is a list of TextContent
+
+                    # result.content is a list of TextContent objects
+                    # We take the first one and parse its JSON text
                     if result.content:
                         return json.loads(result.content[0].text)
                     return {}
 
-        # If an event loop is already running (e.g. inside Streamlit or Jupyter),
-        # asyncio.run() will raise RuntimeError.  Use a background thread instead.
+        # Detect if we're already inside a running event loop (e.g. Streamlit)
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
-            loop = None
+            loop = None   # No running loop — we can safely call asyncio.run()
 
         if loop and loop.is_running():
+            # We're inside Streamlit or another async framework.
+            # Run our coroutine in a separate thread with its own event loop.
             import concurrent.futures
             with concurrent.futures.ThreadPoolExecutor() as pool:
                 future = pool.submit(asyncio.run, _run())
-                return future.result(timeout=300)
+                return future.result(timeout=300)  # 5-minute timeout for IBM Quantum jobs
         else:
+            # Normal case: no existing event loop — just use asyncio.run()
             return asyncio.run(_run())
 
     except Exception as exc:
         logger.error(f"MCP tool call '{tool_name}' failed: {exc}")
-        return {"error": str(exc)}
+        return {"error": str(exc)}   # Return error dict instead of raising
 
 
 # ---------------------------------------------------------------------------
