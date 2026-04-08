@@ -1,15 +1,7 @@
 """
 Streamlit UI — Agentic Quantum Optimization Copilot
 =====================================================
-Interactive dashboard for:
-  1. Inputting a natural language optimization problem
-  2. Selecting the quantum backend
-  3. Running the full LangGraph pipeline
-  4. Visualising: parsed problem, QUBO matrix heatmap, QAOA circuit,
-     convergence curve, bitstring histogram, and the final solution
-
-Run with:
-  streamlit run app.py
+Run with:  streamlit run app.py
 """
 
 from __future__ import annotations
@@ -25,17 +17,19 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# ── Matplotlib global style (matches light purple theme) ─────────────────────
 matplotlib.rcParams.update({
-    "figure.facecolor":  "#0f172a",
-    "axes.facecolor":    "#1e293b",
-    "axes.edgecolor":    "#334155",
-    "axes.labelcolor":   "#94a3b8",
-    "axes.titlecolor":   "#e2e8f0",
-    "xtick.color":       "#64748b",
-    "ytick.color":       "#64748b",
-    "text.color":        "#e2e8f0",
-    "grid.color":        "#1e293b",
-    "grid.linewidth":    0.6,
+    "figure.facecolor": "#f8f7ff",
+    "axes.facecolor":   "#ffffff",
+    "axes.edgecolor":   "#ddd6fe",
+    "axes.labelcolor":  "#5b5470",
+    "axes.titlecolor":  "#1e1535",
+    "xtick.color":      "#7a7391",
+    "ytick.color":      "#7a7391",
+    "text.color":       "#1e1535",
+    "grid.color":       "#ede9fe",
+    "grid.linewidth":   0.5,
+    "font.family":      "sans-serif",
 })
 
 # ── Page config ───────────────────────────────────────────────────────────────
@@ -46,370 +40,418 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# ── Global CSS ────────────────────────────────────────────────────────────────
+# ── CSS ───────────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-/* ── Fonts ── */
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
 
-/* ── Base ── */
-html, body, [class*="css"] {
-    font-family: 'Inter', sans-serif;
+/* Base */
+html, body, [class*="css"] { font-family: 'Inter', sans-serif !important; }
+#MainMenu, footer { visibility: hidden; }
+
+/* Background */
+[data-testid="stAppViewContainer"] > .main {
+    background: radial-gradient(ellipse at 10% 0%, rgba(109,40,217,0.08) 0%, transparent 45%),
+                linear-gradient(180deg, #f8f7ff 0%, #f3f0ff 100%);
 }
+[data-testid="stAppViewContainer"] { background: #f8f7ff; }
 
-.stApp {
-    background: #020817;
-    color: #e2e8f0;
-}
-
-/* ── Hide default Streamlit chrome ── */
-#MainMenu, footer, header { visibility: hidden; }
-
-/* ── Sidebar ── */
+/* Sidebar */
 [data-testid="stSidebar"] {
-    background: #0f172a;
-    border-right: 1px solid #1e293b;
+    background: #ffffff !important;
+    border-right: 1px solid #ddd6fe !important;
 }
-[data-testid="stSidebar"] * { color: #cbd5e1 !important; }
-[data-testid="stSidebar"] .stSelectbox label,
-[data-testid="stSidebar"] h1,
-[data-testid="stSidebar"] h2,
-[data-testid="stSidebar"] h3 { color: #f1f5f9 !important; }
+[data-testid="stSidebar"] > div { padding-top: 1.5rem; }
 
-/* ── Main content area ── */
-.block-container {
-    padding: 2rem 2.5rem;
-    max-width: 1400px;
-}
+/* Content */
+.block-container { padding: 2rem 2.5rem 3rem; max-width: 1280px; }
 
-/* ── Page title ── */
+/* Page title */
 .page-title {
-    font-size: 2rem;
+    font-size: 2.4rem;
     font-weight: 700;
-    letter-spacing: -0.02em;
-    background: linear-gradient(135deg, #818cf8 0%, #38bdf8 50%, #34d399 100%);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-    margin-bottom: 0.25rem;
+    letter-spacing: -0.03em;
+    color: #6d28d9;
+    line-height: 1.1;
+    margin-bottom: 0.2rem;
 }
 .page-subtitle {
     font-size: 0.9rem;
-    color: #475569;
+    color: #7a7391;
     margin-bottom: 2rem;
-    font-weight: 400;
+    max-width: 700px;
+    line-height: 1.6;
 }
 
-/* ── Section headers ── */
+/* Section headers */
 .section-header {
     display: flex;
     align-items: center;
-    gap: 0.6rem;
-    font-size: 0.7rem;
+    gap: 0.55rem;
+    font-size: 0.68rem;
     font-weight: 600;
-    letter-spacing: 0.12em;
+    letter-spacing: 0.13em;
     text-transform: uppercase;
-    color: #475569;
-    margin: 2.5rem 0 1rem 0;
-    padding-bottom: 0.6rem;
-    border-bottom: 1px solid #1e293b;
+    color: #9d8fc0;
+    margin: 2.25rem 0 1rem;
+    padding-bottom: 0.55rem;
+    border-bottom: 1px solid #e9e4ff;
 }
 .section-dot {
-    width: 6px;
-    height: 6px;
+    width: 5px; height: 5px;
     border-radius: 50%;
-    background: linear-gradient(135deg, #818cf8, #38bdf8);
+    background: #7c3aed;
     flex-shrink: 0;
 }
 
-/* ── Cards ── */
-.card {
-    background: #0f172a;
-    border: 1px solid #1e293b;
-    border-radius: 12px;
-    padding: 1.25rem 1.5rem;
-    margin-bottom: 1rem;
-}
-.card-accent {
-    border-left: 3px solid #818cf8;
-}
-
-/* ── Metric cards ── */
-.metric-grid {
-    display: grid;
-    gap: 1rem;
-}
+/* Metric cards */
 .metric-card {
-    background: #0f172a;
-    border: 1px solid #1e293b;
-    border-radius: 10px;
-    padding: 1.1rem 1.25rem;
-    transition: border-color 0.2s;
+    background: #ffffff;
+    border: 1px solid #ddd6fe;
+    border-radius: 12px;
+    padding: 1rem 1.2rem 1.1rem;
+    transition: border-color .18s, box-shadow .18s;
+    box-shadow: 0 2px 8px rgba(109,40,217,0.05);
 }
-.metric-card:hover { border-color: #334155; }
+.metric-card:hover {
+    border-color: #c4b5fd;
+    box-shadow: 0 6px 20px rgba(109,40,217,0.1);
+}
 .metric-label {
-    font-size: 0.7rem;
+    font-size: 0.68rem;
     font-weight: 600;
-    letter-spacing: 0.08em;
+    letter-spacing: 0.09em;
     text-transform: uppercase;
-    color: #475569;
-    margin-bottom: 0.4rem;
+    color: #9d8fc0;
+    margin-bottom: 0.35rem;
 }
 .metric-value {
-    font-size: 1.6rem;
+    font-size: 1.55rem;
     font-weight: 700;
-    color: #f1f5f9;
+    color: #1e1535;
     line-height: 1;
 }
-.metric-value.accent { color: #818cf8; }
-.metric-value.green  { color: #34d399; }
-.metric-value.amber  { color: #fbbf24; }
-.metric-value.red    { color: #f87171; }
+.metric-value.accent { color: #6d28d9; }
+.metric-value.green  { color: #059669; }
+.metric-value.amber  { color: #b45309; }
+.metric-value.red    { color: #dc2626; }
 
-/* ── Result hero card ── */
+/* Result hero */
 .result-hero {
-    background: linear-gradient(135deg, #0f172a 0%, #1a1040 100%);
-    border: 1px solid #312e81;
+    background: linear-gradient(135deg, #ffffff 0%, #f5f3ff 100%);
+    border: 1px solid #c4b5fd;
     border-radius: 16px;
-    padding: 2rem;
-    margin-bottom: 1.5rem;
+    padding: 1.75rem 2rem;
+    margin-bottom: 1.25rem;
     text-align: center;
+    box-shadow: 0 8px 24px rgba(109,40,217,0.1);
 }
 .result-hero-label {
-    font-size: 0.7rem;
+    font-size: 0.68rem;
     font-weight: 600;
-    letter-spacing: 0.12em;
+    letter-spacing: 0.13em;
     text-transform: uppercase;
-    color: #818cf8;
-    margin-bottom: 0.5rem;
+    color: #7c3aed;
+    margin-bottom: 0.45rem;
 }
 .result-hero-assets {
-    font-size: 1.8rem;
+    font-size: 1.9rem;
     font-weight: 700;
-    color: #f1f5f9;
     letter-spacing: -0.02em;
+    color: #4c1d95;
     margin-bottom: 0.25rem;
 }
-.result-hero-value {
-    font-size: 1rem;
-    color: #64748b;
-}
+.result-hero-sub { font-size: 0.9rem; color: #7a7391; }
 
-/* ── Badge ── */
+/* Badges */
 .badge {
     display: inline-block;
-    padding: 0.2rem 0.65rem;
+    padding: 0.22rem 0.7rem;
     border-radius: 999px;
     font-size: 0.7rem;
     font-weight: 600;
-    letter-spacing: 0.04em;
+    letter-spacing: 0.03em;
 }
-.badge-green  { background: #052e16; color: #34d399; border: 1px solid #166534; }
-.badge-red    { background: #450a0a; color: #f87171; border: 1px solid #991b1b; }
-.badge-blue   { background: #0c1a4a; color: #818cf8; border: 1px solid #3730a3; }
-.badge-amber  { background: #3d1f00; color: #fbbf24; border: 1px solid #92400e; }
+.badge-green  { background: #ecfdf5; color: #065f46; border: 1px solid #a7f3d0; }
+.badge-red    { background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; }
+.badge-purple { background: #f5f3ff; color: #5b21b6; border: 1px solid #ddd6fe; }
+.badge-amber  { background: #fffbeb; color: #92400e; border: 1px solid #fde68a; }
 
-/* ── Table ── */
-.styled-table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 0.8rem;
-}
+/* Styled table */
+.styled-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
 .styled-table th {
-    background: #1e293b;
-    color: #64748b;
+    background: #f5f3ff;
+    color: #9d8fc0;
     font-weight: 600;
-    font-size: 0.65rem;
-    letter-spacing: 0.08em;
+    font-size: 0.63rem;
+    letter-spacing: 0.09em;
     text-transform: uppercase;
-    padding: 0.6rem 1rem;
+    padding: 0.55rem 1rem;
     text-align: left;
-    border-bottom: 1px solid #334155;
+    border-bottom: 1px solid #ddd6fe;
 }
 .styled-table td {
-    padding: 0.65rem 1rem;
-    color: #cbd5e1;
-    border-bottom: 1px solid #1e293b;
+    padding: 0.6rem 1rem;
+    color: #1e1535;
+    border-bottom: 1px solid #ede9fe;
+    vertical-align: middle;
 }
-.styled-table tr:hover td { background: #0f172a; }
+.styled-table tr:hover td { background: #faf8ff; }
 .styled-table tr:last-child td { border-bottom: none; }
 
-/* ── Input styling ── */
+/* Inputs */
 .stTextArea textarea {
-    background: #0f172a !important;
-    border: 1px solid #1e293b !important;
+    border: 1px solid #ddd6fe !important;
     border-radius: 10px !important;
-    color: #e2e8f0 !important;
-    font-family: 'Inter', sans-serif !important;
     font-size: 0.875rem !important;
-    resize: vertical;
+    line-height: 1.6 !important;
+    transition: border-color .15s, box-shadow .15s !important;
 }
 .stTextArea textarea:focus {
-    border-color: #818cf8 !important;
-    box-shadow: 0 0 0 3px rgba(129, 140, 248, 0.1) !important;
-}
-.stTextArea label { color: #64748b !important; font-size: 0.75rem !important; }
-
-.stSelectbox > div > div {
-    background: #0f172a !important;
-    border: 1px solid #1e293b !important;
-    border-radius: 8px !important;
-    color: #e2e8f0 !important;
+    border-color: #7c3aed !important;
+    box-shadow: 0 0 0 3px rgba(124,58,237,0.12) !important;
 }
 
-/* ── Button ── */
-.stButton > button {
-    background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%) !important;
-    color: white !important;
+/* Primary button */
+.stButton > button[kind="primary"] {
+    background: #6d28d9 !important;
+    color: #ffffff !important;
     border: none !important;
     border-radius: 10px !important;
     font-weight: 600 !important;
     font-size: 0.875rem !important;
-    letter-spacing: 0.02em !important;
-    padding: 0.65rem 1.5rem !important;
-    transition: all 0.2s !important;
-    box-shadow: 0 4px 15px rgba(99, 102, 241, 0.3) !important;
+    letter-spacing: 0.01em !important;
+    box-shadow: 0 4px 14px rgba(109,40,217,0.3) !important;
+    transition: all .18s !important;
 }
-.stButton > button:hover {
+.stButton > button[kind="primary"]:hover {
+    background: #5b21b6 !important;
+    box-shadow: 0 6px 20px rgba(109,40,217,0.4) !important;
     transform: translateY(-1px) !important;
-    box-shadow: 0 6px 20px rgba(99, 102, 241, 0.4) !important;
 }
 
-/* ── Expander ── */
-.streamlit-expanderHeader {
-    background: #0f172a !important;
-    border: 1px solid #1e293b !important;
-    border-radius: 8px !important;
-    color: #64748b !important;
-    font-size: 0.8rem !important;
-}
-.streamlit-expanderContent {
-    background: #0a0f1e !important;
-    border: 1px solid #1e293b !important;
-    border-top: none !important;
-}
-
-/* ── Code block ── */
-.stCode, code {
-    background: #0a0f1e !important;
-    border: 1px solid #1e293b !important;
-    border-radius: 8px !important;
-    font-family: 'JetBrains Mono', monospace !important;
-    font-size: 0.78rem !important;
-}
-
-/* ── Alerts ── */
-.stSuccess { background: #052e16 !important; border: 1px solid #166534 !important; border-radius: 10px !important; }
-.stError   { background: #450a0a !important; border: 1px solid #991b1b !important; border-radius: 10px !important; }
-.stWarning { background: #3d1f00 !important; border: 1px solid #92400e !important; border-radius: 10px !important; }
-.stInfo    { background: #0c1a4a !important; border: 1px solid #3730a3 !important; border-radius: 10px !important; }
-
-/* ── Download button ── */
+/* Download button */
 .stDownloadButton > button {
-    background: #0f172a !important;
-    color: #818cf8 !important;
-    border: 1px solid #312e81 !important;
-    border-radius: 8px !important;
-    font-size: 0.8rem !important;
+    background: #ffffff !important;
+    color: #6d28d9 !important;
+    border: 1px solid #c4b5fd !important;
+    border-radius: 10px !important;
+    font-size: 0.82rem !important;
     font-weight: 500 !important;
 }
 .stDownloadButton > button:hover {
-    background: #1a1040 !important;
-    border-color: #818cf8 !important;
+    background: #f5f3ff !important;
+    border-color: #7c3aed !important;
 }
 
-/* ── Divider ── */
-hr { border-color: #1e293b !important; }
+/* Expander */
+[data-testid="stExpander"] {
+    border: 1px solid #ddd6fe !important;
+    border-radius: 10px !important;
+    background: #ffffff !important;
+}
+[data-testid="stExpander"] summary {
+    font-size: 0.82rem !important;
+    color: #5b5470 !important;
+    font-weight: 500 !important;
+}
 
-/* ── Spinner ── */
-.stSpinner > div { border-top-color: #818cf8 !important; }
+/* Code */
+[data-testid="stCode"] {
+    border: 1px solid #ddd6fe !important;
+    border-radius: 8px !important;
+    background: #faf8ff !important;
+}
+code { font-family: 'JetBrains Mono', monospace !important; font-size: 0.78rem !important; }
 
-/* ── Scrollbar ── */
-::-webkit-scrollbar { width: 6px; height: 6px; }
-::-webkit-scrollbar-track { background: #020817; }
-::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: #334155; }
+/* Alerts */
+[data-testid="stAlert"] { border-radius: 10px !important; }
+
+/* Spinner */
+[data-testid="stSpinner"] > div { border-top-color: #7c3aed !important; }
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: #f5f3ff; }
+::-webkit-scrollbar-thumb { background: #c4b5fd; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #a78bfa; }
+
+/* Sidebar brand */
+.sidebar-brand { padding: 0.5rem 0 1.5rem; }
+.sidebar-brand-title {
+    font-size: 1.05rem; font-weight: 700;
+    color: #4c1d95; letter-spacing: -0.01em;
+}
+.sidebar-brand-sub { font-size: 0.7rem; color: #9d8fc0; margin-top: 0.15rem; }
+
+/* Step pill */
+.step-pill {
+    display: flex; align-items: center; gap: 0.55rem; margin-bottom: 0.45rem;
+}
+.step-num {
+    width: 22px; height: 22px; border-radius: 6px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 0.58rem; font-weight: 700;
+    flex-shrink: 0;
+}
+.step-label { font-size: 0.74rem; color: #5b5470; }
+
+/* Info box */
+.info-box {
+    background: #f5f3ff;
+    border: 1px solid #ddd6fe;
+    border-radius: 10px;
+    padding: 0.8rem 1rem;
+    font-size: 0.78rem;
+    color: #5b5470;
+    line-height: 1.6;
+}
 </style>
 """, unsafe_allow_html=True)
 
 
-# ── Helper: render a section header ──────────────────────────────────────────
+# ── Helpers ───────────────────────────────────────────────────────────────────
 def section(title: str):
-    st.markdown(f"""
-    <div class="section-header">
-        <div class="section-dot"></div>
-        {title}
-    </div>""", unsafe_allow_html=True)
+    st.markdown(
+        f'<div class="section-header"><div class="section-dot"></div>{title}</div>',
+        unsafe_allow_html=True,
+    )
 
 
-# ── Helper: render metric cards in a row ─────────────────────────────────────
 def metric_row(metrics: list[dict]):
     cols = st.columns(len(metrics))
     for col, m in zip(cols, metrics):
-        color_class = m.get("color", "")
-        col.markdown(f"""
-        <div class="metric-card">
-            <div class="metric-label">{m['label']}</div>
-            <div class="metric-value {color_class}">{m['value']}</div>
-        </div>""", unsafe_allow_html=True)
+        col.markdown(
+            f'<div class="metric-card">'
+            f'<div class="metric-label">{m["label"]}</div>'
+            f'<div class="metric-value {m.get("color","")}">{m["value"]}</div>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+
+
+def style_figure(fig, *, accent="#6d28d9", bar_color="#8b5cf6"):
+    """Apply the app colour palette to a matplotlib figure in-place."""
+    fig.set_facecolor("#f8f7ff")
+    for ax in fig.axes:
+        ax.set_facecolor("#ffffff")
+        for spine in ax.spines.values():
+            spine.set_edgecolor("#ddd6fe")
+        ax.tick_params(colors="#7a7391", labelsize=8)
+        ax.xaxis.label.set_color("#5b5470")
+        ax.yaxis.label.set_color("#5b5470")
+        ax.title.set_color("#1e1535")
+        ax.grid(True, color="#ede9fe", linewidth=0.5, alpha=0.8)
+        for line in ax.get_lines():
+            line.set_color(accent)
+            line.set_linewidth(2)
+        for patch in ax.patches:
+            patch.set_facecolor(bar_color)
+            patch.set_edgecolor("#7c3aed")
+            patch.set_alpha(0.85)
+        for coll in ax.collections:
+            try:
+                coll.set_facecolor(accent)
+                coll.set_alpha(0.1)
+            except Exception:
+                pass
+    fig.tight_layout()
+
+
+@st.cache_data(show_spinner=False)
+def _ibm_backends() -> list[str]:
+    token = os.getenv("IBM_QUANTUM_TOKEN", "").strip()
+    if not token:
+        return []
+    try:
+        from qiskit_ibm_runtime import QiskitRuntimeService
+        ch = os.getenv("IBM_QUANTUM_CHANNEL", "ibm_quantum_platform").strip()
+        if ch == "ibm_quantum":
+            ch = "ibm_quantum_platform"
+        svc = QiskitRuntimeService(channel=ch, token=token)
+        return sorted(b.name for b in svc.backends(operational=True))
+    except Exception:
+        return []
 
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.markdown("""
-    <div style="padding: 1rem 0 1.5rem 0;">
-        <div style="font-size:1.1rem; font-weight:700; color:#f1f5f9; letter-spacing:-0.01em;">
-            ⚛ Quantum Optimizer
-        </div>
-        <div style="font-size:0.72rem; color:#475569; margin-top:0.2rem;">
-            Powered by QAOA + LangGraph
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    st.markdown('<div style="font-size:0.7rem; font-weight:600; letter-spacing:0.1em; text-transform:uppercase; color:#475569; margin-bottom:0.5rem;">Configuration</div>', unsafe_allow_html=True)
-
-    backend_name = st.selectbox(
-        "Quantum Backend",
-        options=["aer_simulator", "ibm_brisbane", "ibm_kyoto", "ibm_osaka"],
-        index=0,
-        help="aer_simulator runs locally. IBM backends require a token in .env",
-    )
-
-    st.markdown("<br>", unsafe_allow_html=True)
-    st.markdown('<div style="font-size:0.7rem; font-weight:600; letter-spacing:0.1em; text-transform:uppercase; color:#475569; margin-bottom:0.75rem;">Pipeline Steps</div>', unsafe_allow_html=True)
-
-    steps = [
-        ("01", "NL → Structured Problem", "#818cf8"),
-        ("02", "QUBO Formulation",        "#38bdf8"),
-        ("03", "QAOA Circuit Build",       "#34d399"),
-        ("04", "Hybrid Execution",         "#fbbf24"),
-        ("05", "Results Analysis",         "#f472b6"),
-    ]
-    for num, label, color in steps:
-        st.markdown(f"""
-        <div style="display:flex; align-items:center; gap:0.6rem; margin-bottom:0.5rem;">
-            <div style="width:20px; height:20px; border-radius:5px; background:{color}22;
-                        border:1px solid {color}44; display:flex; align-items:center;
-                        justify-content:center; font-size:0.55rem; font-weight:700; color:{color}; flex-shrink:0;">
-                {num}
-            </div>
-            <div style="font-size:0.75rem; color:#64748b;">{label}</div>
-        </div>""", unsafe_allow_html=True)
-
-    st.markdown("<br>", unsafe_allow_html=True)
-    st.markdown("""
-    <div style="background:#0a0f1e; border:1px solid #1e293b; border-radius:8px; padding:0.85rem; font-size:0.72rem; color:#475569; line-height:1.6;">
-        Translates natural language into quantum circuits and solves them via QAOA.
-        Classical COBYLA tunes the variational parameters.
+    <div class="sidebar-brand">
+        <div class="sidebar-brand-title">⚛ Quantum Optimizer</div>
+        <div class="sidebar-brand-sub">QAOA · LangGraph · MCP</div>
     </div>""", unsafe_allow_html=True)
 
+    st.markdown(
+        '<div style="font-size:.68rem;font-weight:600;letter-spacing:.1em;'
+        'text-transform:uppercase;color:#9d8fc0;margin-bottom:.5rem;">Backend</div>',
+        unsafe_allow_html=True,
+    )
 
-# ── Page header ───────────────────────────────────────────────────────────────
-st.markdown('<div class="page-title">Agentic Quantum Optimization Copilot</div>', unsafe_allow_html=True)
-st.markdown('<div class="page-subtitle">Describe a combinatorial optimization problem in plain English — the agent formulates it as QUBO, builds a QAOA circuit, and finds the optimal solution.</div>', unsafe_allow_html=True)
+    ibm = _ibm_backends()
+    backend_options = ["aer_simulator"] + ibm
+    backend_name = st.selectbox(
+        "Backend",
+        options=backend_options,
+        index=0,
+        help="aer_simulator runs locally (free). IBM backends require IBM_QUANTUM_TOKEN in .env",
+        label_visibility="collapsed",
+    )
 
-# ── Example problems ──────────────────────────────────────────────────────────
+    if backend_name == "aer_simulator":
+        st.markdown(
+            '<div style="font-size:.72rem;color:#059669;margin-top:.25rem;">'
+            '● Local simulator active</div>',
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown(
+            f'<div style="font-size:.72rem;color:#7c3aed;margin-top:.25rem;">'
+            f'● IBM Quantum — {backend_name}</div>',
+            unsafe_allow_html=True,
+        )
+
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown(
+        '<div style="font-size:.68rem;font-weight:600;letter-spacing:.1em;'
+        'text-transform:uppercase;color:#9d8fc0;margin-bottom:.6rem;">Pipeline</div>',
+        unsafe_allow_html=True,
+    )
+
+    _steps = [
+        ("01", "NL → Structured Problem", "#6d28d9"),
+        ("02", "QUBO Formulation",        "#7c3aed"),
+        ("03", "QAOA Circuit Build",      "#8b5cf6"),
+        ("04", "Hybrid Execution",        "#a78bfa"),
+        ("05", "Results Analysis",        "#c4b5fd"),
+    ]
+    for num, label, color in _steps:
+        st.markdown(
+            f'<div class="step-pill">'
+            f'<div class="step-num" style="background:{color}22;border:1px solid {color}55;color:{color};">{num}</div>'
+            f'<div class="step-label">{label}</div>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown(
+        '<div class="info-box">Translates a plain-English problem into a QUBO, '
+        'builds a QAOA circuit, and finds the optimal solution via classical-quantum '
+        'hybrid optimization.</div>',
+        unsafe_allow_html=True,
+    )
+
+
+# ── Header ────────────────────────────────────────────────────────────────────
+st.markdown('<div class="page-title">Agentic Quantum Optimization</div>', unsafe_allow_html=True)
+st.markdown(
+    '<div class="page-subtitle">Describe a combinatorial optimization problem in plain English. '
+    'The agent formulates it as QUBO, builds a QAOA circuit, and finds the optimal solution.</div>',
+    unsafe_allow_html=True,
+)
+
+# ── Examples ──────────────────────────────────────────────────────────────────
 EXAMPLES = {
     "Portfolio Selection (5 assets)": (
         "I have 5 assets: AAPL, GOOGL, MSFT, AMZN, TSLA. "
@@ -431,37 +473,37 @@ EXAMPLES = {
 # ── Problem input ─────────────────────────────────────────────────────────────
 section("Problem Statement")
 
-col_input, col_example = st.columns([3, 1])
-with col_example:
-    example_choice = st.selectbox("Load example", ["— Custom —"] + list(EXAMPLES.keys()), label_visibility="collapsed")
-with col_input:
-    default_text = EXAMPLES.get(example_choice, "") if example_choice != "— Custom —" else ""
+col_txt, col_ex = st.columns([3, 1])
+with col_ex:
+    ex_choice = st.selectbox(
+        "Example", ["— Custom —"] + list(EXAMPLES.keys()),
+        label_visibility="collapsed",
+    )
+with col_txt:
     user_input = st.text_area(
         "problem",
-        value=default_text,
-        height=130,
-        placeholder="e.g.  Select 3 from AAPL, GOOGL, MSFT, AMZN, TSLA to maximize return. Returns: 0.9, 0.8, 0.75, 0.85, 0.7",
+        value=EXAMPLES.get(ex_choice, "") if ex_choice != "— Custom —" else "",
+        height=128,
+        placeholder="e.g.  Select 3 from AAPL, GOOGL, MSFT, AMZN, TSLA to maximize return…",
         label_visibility="collapsed",
     )
 
-st.markdown("<div style='height:0.5rem'></div>", unsafe_allow_html=True)
-run_button = st.button("Run Quantum Optimization", type="primary", use_container_width=True)
+st.markdown("<div style='height:.4rem'></div>", unsafe_allow_html=True)
+run_btn = st.button("Run Quantum Optimization", type="primary", use_container_width=True)
 
-# ── Run pipeline ──────────────────────────────────────────────────────────────
-if run_button:
+# ── Run ───────────────────────────────────────────────────────────────────────
+if run_btn:
     if not user_input.strip():
         st.error("Please enter a problem statement.")
         st.stop()
-
     if not os.getenv("ANTHROPIC_API_KEY") and not os.getenv("OPENAI_API_KEY"):
-        st.error("No API key found. Add ANTHROPIC_API_KEY or OPENAI_API_KEY to your .env file.")
+        st.error("No LLM API key found — add ANTHROPIC_API_KEY or OPENAI_API_KEY to your .env file.")
         st.stop()
 
-    with st.spinner("Running the quantum optimization pipeline..."):
+    with st.spinner("Running the quantum optimization pipeline…"):
         try:
             from agents.graph import build_graph
-            graph = build_graph()
-            result = graph.invoke({
+            result = build_graph().invoke({
                 "user_input": user_input.strip(),
                 "backend_name": backend_name,
                 "logs": [],
@@ -477,144 +519,124 @@ if run_button:
 
     parsed = result.get("parsed_problem", {})
     if parsed.get("clarification_needed"):
-        st.warning(f"Clarification needed: {parsed.get('clarification_question')}")
+        st.warning(f"Clarification needed — {parsed.get('clarification_question')}")
         st.stop()
 
     st.success("Optimization complete")
-    st.markdown("<div style='height:0.5rem'></div>", unsafe_allow_html=True)
 
-    # ════════════════════════════════════════════════════════════════════════════
-    # SECTION 1 — Parsed Problem
-    # ════════════════════════════════════════════════════════════════════════════
+    # ── Section 1: Parsed Problem ─────────────────────────────────────────────
     section("01  ·  Parsed Problem")
-    if parsed:
-        assets_list = parsed.get("assets", [])
-        metric_row([
-            {"label": "Total Assets",  "value": len(assets_list),                          "color": "accent"},
-            {"label": "Objective",     "value": parsed.get("objective", "—").capitalize(),  "color": ""},
-            {"label": "Select k",      "value": parsed.get("num_select", "—"),              "color": ""},
-            {"label": "Constraints",   "value": len(parsed.get("hard_constraints", [])),    "color": ""},
-        ])
+    assets_list = parsed.get("assets", [])
+    metric_row([
+        {"label": "Assets",      "value": len(assets_list),                         "color": "accent"},
+        {"label": "Objective",   "value": parsed.get("objective","—").capitalize(),  "color": ""},
+        {"label": "Select k",    "value": parsed.get("num_select", "—"),             "color": ""},
+        {"label": "Constraints", "value": len(parsed.get("hard_constraints", [])),   "color": ""},
+    ])
 
-        if assets_list:
-            weights = parsed.get("objective_weights", {})
-            sorted_assets = sorted(assets_list, key=lambda a: weights.get(a, 0), reverse=True)
-            pills_html = " ".join(
-                f'<span style="background:#0c1a4a; border:1px solid #3730a3; color:#818cf8; '
-                f'border-radius:6px; padding:0.2rem 0.6rem; font-size:0.75rem; font-weight:500;">'
-                f'{a} <span style="color:#475569;">{weights.get(a, "")}</span></span>'
-                for a in sorted_assets
-            )
-            st.markdown(f'<div style="margin-top:0.75rem; display:flex; flex-wrap:wrap; gap:0.4rem;">{pills_html}</div>', unsafe_allow_html=True)
+    if assets_list:
+        weights = parsed.get("objective_weights", {})
+        pills = " ".join(
+            f'<span style="display:inline-flex;align-items:center;gap:.3rem;'
+            f'background:#f5f3ff;border:1px solid #ddd6fe;color:#5b21b6;'
+            f'border-radius:7px;padding:.2rem .65rem;font-size:.76rem;font-weight:500;">'
+            f'{a}<span style="color:#9d8fc0;font-weight:400;">{weights.get(a,"")}</span></span>'
+            for a in sorted(assets_list, key=lambda x: weights.get(x, 0), reverse=True)
+        )
+        st.markdown(
+            f'<div style="margin-top:.75rem;display:flex;flex-wrap:wrap;gap:.4rem;">{pills}</div>',
+            unsafe_allow_html=True,
+        )
 
-        with st.expander("View structured JSON"):
-            st.json({k: v for k, v in parsed.items() if k != "clarification_question"})
+    with st.expander("View structured JSON"):
+        st.json({k: v for k, v in parsed.items() if k != "clarification_question"})
 
-    # ════════════════════════════════════════════════════════════════════════════
-    # SECTION 2 — QUBO Matrix
-    # ════════════════════════════════════════════════════════════════════════════
+    # ── Section 2: QUBO Matrix ────────────────────────────────────────────────
     section("02  ·  QUBO Matrix")
     qubo_matrix = result.get("qubo_matrix")
     if qubo_matrix:
         Q = np.array(qubo_matrix)
         n = Q.shape[0]
-        display_assets = parsed.get("assets", [str(i) for i in range(n)])
+        labels = parsed.get("assets", [str(i) for i in range(n)])
 
-        col_heatmap, col_qubo_stats = st.columns([3, 1])
-        with col_heatmap:
+        col_heat, col_stats = st.columns([3, 1])
+        with col_heat:
             sz = min(max(n, 4), 9)
-            fig_qubo, ax = plt.subplots(figsize=(sz, sz))
-            im = ax.imshow(Q, cmap="RdYlBu_r", aspect="auto")
-            ax.set_xticks(range(len(display_assets)))
-            ax.set_yticks(range(len(display_assets)))
-            ax.set_xticklabels(display_assets, rotation=45, ha="right", fontsize=9)
-            ax.set_yticklabels(display_assets, fontsize=9)
-            cb = plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
-            cb.ax.tick_params(labelsize=8, colors="#64748b")
-            cb.outline.set_edgecolor("#334155")
-            ax.set_title("QUBO Coefficient Matrix", fontsize=11, pad=12, color="#94a3b8")
-            for spine in ax.spines.values():
-                spine.set_edgecolor("#334155")
-            plt.tight_layout()
-            st.pyplot(fig_qubo, use_container_width=True)
+            fig_q, ax_q = plt.subplots(figsize=(sz, sz))
+            im = ax_q.imshow(Q, cmap="PuRd", aspect="auto")
+            ax_q.set_xticks(range(len(labels)))
+            ax_q.set_yticks(range(len(labels)))
+            ax_q.set_xticklabels(labels, rotation=45, ha="right", fontsize=9)
+            ax_q.set_yticklabels(labels, fontsize=9)
+            cb = plt.colorbar(im, ax=ax_q, fraction=0.046, pad=0.04)
+            cb.ax.tick_params(labelsize=8, colors="#7a7391")
+            cb.outline.set_edgecolor("#ddd6fe")
+            ax_q.set_title("QUBO Coefficient Matrix", fontsize=11, pad=10)
+            for sp in ax_q.spines.values():
+                sp.set_edgecolor("#ddd6fe")
+            fig_q.tight_layout()
+            st.pyplot(fig_q, use_container_width=True)
 
-        with col_qubo_stats:
+        with col_stats:
             st.markdown("<br>", unsafe_allow_html=True)
             for lbl, val in [
                 ("Variables", Q.shape[0]),
-                ("Non-zero", int(np.count_nonzero(Q))),
-                ("Offset", f"{result.get('qubo_offset', 0.0):.3f}"),
-                ("Qubits", result.get("num_qubits", "—")),
+                ("Non-zero",  int(np.count_nonzero(Q))),
+                ("Offset",    f"{result.get('qubo_offset', 0.0):.3f}"),
+                ("Qubits",    result.get("num_qubits", "—")),
             ]:
-                st.markdown(f"""
-                <div class="metric-card" style="margin-bottom:0.6rem;">
-                    <div class="metric-label">{lbl}</div>
-                    <div class="metric-value" style="font-size:1.2rem;">{val}</div>
-                </div>""", unsafe_allow_html=True)
+                st.markdown(
+                    f'<div class="metric-card" style="margin-bottom:.55rem;">'
+                    f'<div class="metric-label">{lbl}</div>'
+                    f'<div class="metric-value" style="font-size:1.15rem;">{val}</div>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
 
-    # ════════════════════════════════════════════════════════════════════════════
-    # SECTION 3 — QAOA Circuit
-    # ════════════════════════════════════════════════════════════════════════════
+    # ── Section 3: QAOA Circuit ───────────────────────────────────────────────
     section("03  ·  QAOA Circuit")
     feasible = result.get("transpilation_feasible")
+    depth    = result.get("circuit_depth") or 0
     metric_row([
-        {"label": "Qubits",         "value": result.get("num_qubits", "—"),   "color": "accent"},
-        {"label": "Circuit Depth",  "value": result.get("circuit_depth", "—"), "color": "amber" if (result.get("circuit_depth") or 0) > 100 else "green"},
-        {"label": "Parameters",     "value": result.get("num_parameters", "—"), "color": ""},
-        {"label": "Transpilation",  "value": "Pass" if feasible else "Fail",   "color": "green" if feasible else "red"},
+        {"label": "Qubits",        "value": result.get("num_qubits", "—"),   "color": "accent"},
+        {"label": "Circuit Depth", "value": depth,                            "color": "amber" if depth > 100 else "green"},
+        {"label": "Parameters",    "value": result.get("num_parameters","—"), "color": ""},
+        {"label": "Transpilation", "value": "Pass" if feasible else "Fail",   "color": "green" if feasible else "red"},
     ])
-
     if result.get("circuit_qasm"):
         with st.expander("View OpenQASM 3 source"):
             st.code(result["circuit_qasm"], language="text")
 
-    # ════════════════════════════════════════════════════════════════════════════
-    # SECTION 4 — Hybrid Execution
-    # ════════════════════════════════════════════════════════════════════════════
+    # ── Section 4: Hybrid Execution ───────────────────────────────────────────
     section("04  ·  Hybrid Execution  ·  COBYLA + QAOA")
+    conv = result.get("convergence_history", [])
     metric_row([
         {"label": "Optimal Energy ⟨H⟩", "value": f"{result.get('optimal_energy', 0.0):.5f}", "color": "accent"},
         {"label": "Backend",             "value": result.get("backend_name", "—"),             "color": ""},
-        {"label": "Iterations",          "value": len(result.get("convergence_history", [])),  "color": ""},
+        {"label": "COBYLA Iterations",   "value": len(conv),                                   "color": ""},
     ])
 
-    conv = result.get("convergence_history", [])
-    sol = result.get("final_solution", {})
-    conv_fig = sol.get("_convergence_fig") if sol else None
+    sol      = result.get("final_solution", {}) or {}
+    conv_fig = sol.get("_convergence_fig")
 
     if conv_fig:
-        # Re-style the convergence figure to match the dark theme
-        conv_fig.set_facecolor("#0f172a")
-        for ax in conv_fig.axes:
-            ax.set_facecolor("#1e293b")
-            ax.tick_params(colors="#64748b")
-            ax.xaxis.label.set_color("#94a3b8")
-            ax.yaxis.label.set_color("#94a3b8")
-            ax.title.set_color("#e2e8f0")
-            for spine in ax.spines.values():
-                spine.set_edgecolor("#334155")
-            for line in ax.get_lines():
-                line.set_color("#818cf8")
-                line.set_linewidth(2)
+        style_figure(conv_fig, accent="#6d28d9")
         st.pyplot(conv_fig, use_container_width=True)
     elif conv:
-        fig_conv, ax = plt.subplots(figsize=(10, 3.5))
-        ax.plot(range(1, len(conv) + 1), conv, color="#818cf8", linewidth=2, alpha=0.9)
-        ax.fill_between(range(1, len(conv) + 1), conv, alpha=0.08, color="#818cf8")
-        ax.set_xlabel("COBYLA Iteration")
-        ax.set_ylabel("⟨H⟩  Energy")
-        ax.set_title("Optimization Convergence", pad=12)
-        ax.grid(True, alpha=0.15)
-        for spine in ax.spines.values():
-            spine.set_edgecolor("#334155")
-        plt.tight_layout()
-        st.pyplot(fig_conv, use_container_width=True)
+        fig_c, ax_c = plt.subplots(figsize=(10, 3.2))
+        ax_c.plot(range(1, len(conv) + 1), conv, color="#6d28d9", linewidth=2)
+        ax_c.fill_between(range(1, len(conv) + 1), conv, alpha=0.08, color="#6d28d9")
+        ax_c.set_xlabel("Iteration")
+        ax_c.set_ylabel("⟨H⟩")
+        ax_c.set_title("Optimization Convergence")
+        ax_c.grid(True, color="#ede9fe", linewidth=0.5)
+        for sp in ax_c.spines.values():
+            sp.set_edgecolor("#ddd6fe")
+        fig_c.tight_layout()
+        st.pyplot(fig_c, use_container_width=True)
 
-    # ════════════════════════════════════════════════════════════════════════════
-    # SECTION 5 — Results
-    # ════════════════════════════════════════════════════════════════════════════
+    # ── Section 5: Results ────────────────────────────────────────────────────
     section("05  ·  Optimization Results")
-
     if sol:
         selected      = sol.get("selected_assets", [])
         obj_val       = sol.get("objective_value", 0)
@@ -623,99 +645,100 @@ if run_button:
         classical     = sol.get("classical_optimum_selection", [])
         classical_val = sol.get("classical_optimum_value")
 
-        # Result hero card
-        constraint_badge = '<span class="badge badge-green">Constraints satisfied</span>' if constraint_ok else '<span class="badge badge-red">Constraints violated</span>'
-        st.markdown(f"""
-        <div class="result-hero">
-            <div class="result-hero-label">Optimal Portfolio</div>
-            <div class="result-hero-assets">{" · ".join(selected) if selected else "No solution"}</div>
-            <div class="result-hero-value" style="margin-bottom:0.75rem;">Objective value: <strong style="color:#f1f5f9;">{obj_val:.4f}</strong></div>
-            {constraint_badge}
-        </div>""", unsafe_allow_html=True)
+        badge = (
+            '<span class="badge badge-green">Constraints satisfied</span>'
+            if constraint_ok else
+            '<span class="badge badge-red">Constraints violated</span>'
+        )
+        st.markdown(
+            f'<div class="result-hero">'
+            f'<div class="result-hero-label">Optimal Portfolio</div>'
+            f'<div class="result-hero-assets">{" · ".join(selected) if selected else "No solution found"}</div>'
+            f'<div class="result-hero-sub" style="margin-bottom:.7rem;">'
+            f'Objective value: <strong style="color:#4c1d95;">{obj_val:.4f}</strong></div>'
+            f'{badge}'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
 
-        # Metrics row
         ratio_color = "green" if approx_ratio >= 0.95 else "amber" if approx_ratio >= 0.8 else "red"
         metric_row([
-            {"label": "Objective Value",     "value": f"{obj_val:.4f}",            "color": "accent"},
-            {"label": "Approximation Ratio", "value": f"{approx_ratio:.3f}",       "color": ratio_color},
-            {"label": "Total Shots",         "value": sol.get("total_shots", 1024), "color": ""},
-            {"label": "Classical Optimum",   "value": f"{classical_val:.4f}" if classical_val else "—", "color": ""},
+            {"label": "Objective Value",     "value": f"{obj_val:.4f}",                                         "color": "accent"},
+            {"label": "Approximation Ratio", "value": f"{approx_ratio:.3f}",                                    "color": ratio_color},
+            {"label": "Total Shots",         "value": sol.get("total_shots", 1024),                             "color": ""},
+            {"label": "Classical Optimum",   "value": f"{classical_val:.4f}" if classical_val else "—",         "color": ""},
         ])
 
         if classical:
-            st.markdown(f"""
-            <div style="background:#0c1a4a; border:1px solid #3730a3; border-radius:8px;
-                        padding:0.75rem 1rem; margin-top:0.75rem; font-size:0.8rem; color:#94a3b8;">
-                Classical brute-force optimum:
-                <strong style="color:#818cf8;">{", ".join(classical)}</strong>
-                (value = {f"{classical_val:.4f}" if classical_val else "N/A"})
-            </div>""", unsafe_allow_html=True)
+            st.markdown(
+                f'<div class="info-box" style="margin-top:.75rem;">'
+                f'Classical brute-force optimum: '
+                f'<strong style="color:#4c1d95;">{", ".join(classical)}</strong>'
+                f' (value = {f"{classical_val:.4f}" if classical_val else "N/A"})'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
 
-        # Histogram
         hist_fig = sol.get("_histogram_fig")
         if hist_fig:
-            st.markdown("<div style='height:0.75rem'></div>", unsafe_allow_html=True)
-            hist_fig.set_facecolor("#0f172a")
-            for ax in hist_fig.axes:
-                ax.set_facecolor("#1e293b")
-                ax.tick_params(colors="#64748b")
-                ax.xaxis.label.set_color("#94a3b8")
-                ax.yaxis.label.set_color("#94a3b8")
-                ax.title.set_color("#e2e8f0")
-                for spine in ax.spines.values():
-                    spine.set_edgecolor("#334155")
-                for bar in ax.patches:
-                    bar.set_facecolor("#6366f1")
-                    bar.set_edgecolor("#4f46e5")
-                    bar.set_alpha(0.85)
+            st.markdown("<div style='height:.6rem'></div>", unsafe_allow_html=True)
+            style_figure(hist_fig, accent="#6d28d9", bar_color="#8b5cf6")
             st.pyplot(hist_fig, use_container_width=True)
 
-        # Top candidates table
         candidates = sol.get("top_candidates", [])
         if candidates:
-            st.markdown("<div style='height:0.5rem'></div>", unsafe_allow_html=True)
-            st.markdown('<div style="font-size:0.7rem; font-weight:600; letter-spacing:0.08em; text-transform:uppercase; color:#475569; margin-bottom:0.5rem;">Top Measurement Outcomes</div>', unsafe_allow_html=True)
-            rows = ""
-            for c in candidates:
-                sat = '<span class="badge badge-green">✓</span>' if c["constraint_satisfied"] else '<span class="badge badge-red">✗</span>'
-                rows += f"""<tr>
-                    <td><code style="background:#0a0f1e; padding:0.15rem 0.4rem; border-radius:4px; font-size:0.75rem; color:#818cf8;">{c['bitstring']}</code></td>
-                    <td>{", ".join(c['selection']) or "—"}</td>
-                    <td>{c['probability']:.4f}</td>
-                    <td>{c['objective_value']:.4f}</td>
-                    <td>{sat}</td>
-                </tr>"""
-            st.markdown(f"""
-            <div class="card" style="padding:0; overflow:hidden;">
-            <table class="styled-table">
-                <thead><tr>
-                    <th>Bitstring</th><th>Selected Assets</th>
-                    <th>Probability</th><th>Objective</th><th>Constraints</th>
-                </tr></thead>
-                <tbody>{rows}</tbody>
-            </table>
-            </div>""", unsafe_allow_html=True)
+            st.markdown("<div style='height:.4rem'></div>", unsafe_allow_html=True)
+            rows = "".join(
+                f'<tr>'
+                f'<td><code style="background:#f5f3ff;padding:.15rem .4rem;border-radius:5px;'
+                f'font-size:.74rem;color:#5b21b6;">{c["bitstring"]}</code></td>'
+                f'<td style="font-weight:500;">{", ".join(c["selection"]) or "—"}</td>'
+                f'<td>{c["probability"]:.4f}</td>'
+                f'<td>{c["objective_value"]:.4f}</td>'
+                f'<td>{"<span class=\'badge badge-green\'>✓</span>" if c["constraint_satisfied"] else "<span class=\'badge badge-red\'>✗</span>"}</td>'
+                f'</tr>'
+                for c in candidates
+            )
+            st.markdown(
+                f'<div style="border:1px solid #ddd6fe;border-radius:12px;overflow:hidden;margin-top:.5rem;">'
+                f'<table class="styled-table">'
+                f'<thead><tr><th>Bitstring</th><th>Selected Assets</th>'
+                f'<th>Probability</th><th>Objective</th><th>Constraints</th></tr></thead>'
+                f'<tbody>{rows}</tbody>'
+                f'</table></div>',
+                unsafe_allow_html=True,
+            )
 
-    # ════════════════════════════════════════════════════════════════════════════
-    # SECTION 6 — Experiment Log
-    # ════════════════════════════════════════════════════════════════════════════
+    # ── Section 6: Log ────────────────────────────────────────────────────────
     section("06  ·  Experiment Log")
     logs = result.get("logs", [])
     with st.expander(f"{len(logs)} log entries"):
-        log_html = "".join(
-            f'<div style="font-size:0.73rem; color:#{"34d399" if "[intake" in l else "38bdf8" if "[qubo" in l else "818cf8" if "[circuit" in l else "fbbf24" if "[execution" in l else "f472b6" if "[results" in l else "64748b"}; '
-            f'padding:0.15rem 0; font-family:\'JetBrains Mono\', monospace; border-bottom:1px solid #0a0f1e;">{l}</div>'
+        _colors = {
+            "[intake":    "#6d28d9",
+            "[qubo":      "#7c3aed",
+            "[circuit":   "#0369a1",
+            "[execution": "#b45309",
+            "[results":   "#065f46",
+            "[handle":    "#dc2626",
+        }
+        rows_html = "".join(
+            f'<div style="font-size:.72rem;color:{next((v for k,v in _colors.items() if k in l),"#7a7391")};'
+            f'padding:.12rem 0;border-bottom:1px solid #f3f0ff;'
+            f'font-family:\'JetBrains Mono\',monospace;">{l}</div>'
             for l in logs
         )
-        st.markdown(f'<div style="background:#0a0f1e; border-radius:8px; padding:0.75rem; max-height:300px; overflow-y:auto;">{log_html}</div>', unsafe_allow_html=True)
+        st.markdown(
+            f'<div style="background:#faf8ff;border:1px solid #ede9fe;border-radius:10px;'
+            f'padding:.75rem;max-height:280px;overflow-y:auto;">{rows_html}</div>',
+            unsafe_allow_html=True,
+        )
 
     log_json = json.dumps(
         {k: v for k, v in result.items() if k not in ("ising_hamiltonian", "final_solution")},
-        default=str,
-        indent=2,
+        default=str, indent=2,
     )
     st.download_button(
-        label="Download Experiment Log  (JSON)",
+        "Download Experiment Log (JSON)",
         data=log_json,
         file_name="quantum_experiment_log.json",
         mime="application/json",

@@ -59,6 +59,14 @@ _MAX_SAFE_DEPTH = 200
 _DEFAULT_REPS = 1
 
 
+def _runtime_channel() -> str:
+    """Normalize legacy channel names to the current Qiskit Runtime values."""
+    channel = os.getenv("IBM_QUANTUM_CHANNEL", "ibm_quantum_platform").strip()
+    if channel == "ibm_quantum":
+        return "ibm_quantum_platform"
+    return channel or "ibm_quantum_platform"
+
+
 def _get_backend(backend_name: str) -> Any:
     """Return a Qiskit backend object for the given name."""
     from qiskit_aer import AerSimulator
@@ -71,18 +79,19 @@ def _get_backend(backend_name: str) -> Any:
     try:
         from qiskit_ibm_runtime import QiskitRuntimeService
 
+        token = os.getenv("IBM_QUANTUM_TOKEN")
+        if not token:
+            raise RuntimeError("IBM_QUANTUM_TOKEN is not configured.")
+
         service = QiskitRuntimeService(
-            channel=os.getenv("IBM_QUANTUM_CHANNEL", "ibm_quantum"),
-            token=os.getenv("IBM_QUANTUM_TOKEN"),
+            channel=_runtime_channel(),
+            token=token,
         )
         return service.backend(backend_name)
     except Exception as exc:
-        # If we can't reach IBM Quantum, fall back to the local simulator
-        logger.warning(
-            f"Could not load IBM Quantum backend '{backend_name}': {exc}. "
-            "Falling back to AerSimulator."
-        )
-        return AerSimulator()
+        raise RuntimeError(
+            f"Could not load IBM Quantum backend '{backend_name}': {exc}"
+        ) from exc
 
 
 def _choose_reps(num_qubits: int) -> int:
@@ -98,6 +107,16 @@ def _choose_reps(num_qubits: int) -> int:
         return 1   # Medium problem: 1 layer keeps it feasible
     else:
         return 1   # Large problem: stick to 1 layer to stay within hardware limits
+
+
+def _to_qasm(ansatz) -> str:
+    """Decompose a QAOA ansatz enough for OpenQASM 3 export."""
+    decomposed = ansatz
+    for _ in range(3):
+        decomposed = decomposed.decompose()
+
+    from qiskit.qasm3 import dumps as qasm3_dumps
+    return qasm3_dumps(decomposed)
 
 
 def build_qaoa_circuit(state: AgentState) -> AgentState:
@@ -125,12 +144,11 @@ def build_qaoa_circuit(state: AgentState) -> AgentState:
         # QAOAAnsatz takes the Hamiltonian and creates a parameterized circuit.
         # It has "reps" pairs of (cost layer + mixer layer).
         # Each rep adds 2 parameters: one gamma (γ) and one beta (β).
-        reps = _choose_reps(num_qubits)
-        logs.append(f"[circuit_constructor] Building QAOAAnsatz: {num_qubits} qubits, reps={reps}")
-
-        ansatz = QAOAAnsatz(cost_operator=ising_hamiltonian, reps=reps)
-        num_parameters = ansatz.num_parameters   # = 2 * reps (one γ and β per layer)
-        logs.append(f"[circuit_constructor] Ansatz has {num_parameters} variational parameters")
+        preferred_reps = _choose_reps(num_qubits)
+        logs.append(
+            f"[circuit_constructor] Building QAOAAnsatz: {num_qubits} qubits, "
+            f"preferred_reps={preferred_reps}"
+        )
 
         # ── Transpilation Check ───────────────────────────────────────────────
         # Get the backend object so we know its qubit count and native gate set
@@ -158,51 +176,76 @@ def build_qaoa_circuit(state: AgentState) -> AgentState:
                 "logs": logs,
             }
 
-        # Run the transpiler (optimization_level=1 = moderate optimization)
-        # This compiles the circuit into hardware-native gates and checks depth
-        pm = generate_preset_pass_manager(
-            optimization_level=1,
-            backend=backend,
+        chosen_ansatz = None
+        chosen_depth = None
+        chosen_num_parameters = None
+        best_failed_depth = None
+
+        for reps in range(preferred_reps, 0, -1):
+            ansatz = QAOAAnsatz(cost_operator=ising_hamiltonian, reps=reps)
+            num_parameters = ansatz.num_parameters
+            logs.append(
+                f"[circuit_constructor] Trying reps={reps} "
+                f"({num_parameters} variational parameters)"
+            )
+
+            # Use a stronger optimization pass when checking hardware feasibility.
+            pm = generate_preset_pass_manager(
+                optimization_level=3,
+                backend=backend,
+            )
+            transpiled = pm.run(ansatz)
+            circuit_depth = transpiled.depth()
+            gate_count = sum(transpiled.count_ops().values())
+
+            logs.append(
+                f"[circuit_constructor] Transpiled reps={reps}: "
+                f"depth={circuit_depth}, gate_count={gate_count}"
+            )
+
+            if circuit_depth <= _MAX_SAFE_DEPTH:
+                chosen_ansatz = ansatz
+                chosen_depth = circuit_depth
+                chosen_num_parameters = num_parameters
+                if reps != preferred_reps:
+                    logs.append(
+                        f"[circuit_constructor] Reduced reps from {preferred_reps} to {reps} "
+                        f"to satisfy depth limit {_MAX_SAFE_DEPTH}."
+                    )
+                break
+
+            best_failed_depth = circuit_depth
+
+        if chosen_ansatz is None:
+            msg = (
+                f"[circuit_constructor] No feasible QAOA circuit found for backend "
+                f"'{backend_name}'. Even reps=1 exceeded the safe depth limit "
+                f"({_MAX_SAFE_DEPTH}); last observed depth={best_failed_depth}."
+            )
+            logs.append(msg)
+            return {
+                **state,
+                "transpilation_feasible": False,
+                "error": msg,
+                "logs": logs,
+            }
+
+        logs.append(
+            f"[circuit_constructor] Transpilation OK: depth={chosen_depth}, "
+            f"num_parameters={chosen_num_parameters}"
         )
-        transpiled = pm.run(ansatz)
-
-        # Measure the compiled circuit's depth (number of sequential gate layers)
-        circuit_depth = transpiled.depth()
-
-        # Is the depth within the safe limit for near-term hardware?
-        transpilation_feasible = circuit_depth <= _MAX_SAFE_DEPTH
-
-        if not transpilation_feasible:
-            logs.append(
-                f"[circuit_constructor] WARNING: transpiled depth={circuit_depth} "
-                f"exceeds safe limit ({_MAX_SAFE_DEPTH}). Consider reducing reps."
-            )
-        else:
-            logs.append(
-                f"[circuit_constructor] Transpilation OK: depth={circuit_depth}, "
-                f"gate_count={sum(transpiled.count_ops().values())}"
-            )
 
         # ── Serialize to OpenQASM 3 ───────────────────────────────────────────
         # We use the ORIGINAL ansatz (not transpiled) for the QASM export,
         # because the MCP server will retranspile it for the actual backend.
-        # First, decompose high-level composite gates into standard ones
-        # (QAOAAnsatz uses abstract gates like "PauliEvolution" that need expanding).
-        decomposed = ansatz
-        for _ in range(3):
-            # Each decompose() call expands one level of abstraction
-            decomposed = decomposed.decompose()
-
-        # Convert the circuit to OpenQASM 3 text format for MCP transport
-        from qiskit.qasm3 import dumps as qasm3_dumps
-        circuit_qasm = qasm3_dumps(decomposed)
+        circuit_qasm = _to_qasm(chosen_ansatz)
 
         return {
             **state,
             "circuit_qasm": circuit_qasm,                    # Text representation of the circuit
-            "circuit_depth": circuit_depth,                  # Depth after transpilation
-            "num_parameters": num_parameters,                # How many knobs COBYLA will tune
-            "transpilation_feasible": transpilation_feasible, # Pass/fail flag for the UI
+            "circuit_depth": chosen_depth,                   # Depth after transpilation
+            "num_parameters": chosen_num_parameters,         # How many knobs COBYLA will tune
+            "transpilation_feasible": True,                  # Pass/fail flag for the UI
             "logs": logs,
             "error": None,
         }

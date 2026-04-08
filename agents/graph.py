@@ -72,7 +72,7 @@ def handle_error(state: AgentState) -> AgentState:
     """
     Route to this node when any upstream node sets state['error'].
     Attempts:
-      1. If backend is IBM Quantum and error is execution-related → switch to aer_simulator
+      1. Preserve the requested backend
       2. Increment retry counter
       3. If retries exhausted → leave error set and route to END
     """
@@ -96,11 +96,7 @@ def handle_error(state: AgentState) -> AgentState:
         logs.append("[handle_error] Max retries exceeded. Terminating with error.")
         return {**state, "logs": logs}  # error stays set → routes to END
 
-    # If we were using IBM Quantum hardware and execution failed,
-    # automatically fall back to the local AerSimulator for the retry
-    if backend_name != "aer_simulator" and "execution" in error.lower():
-        logs.append("[handle_error] Switching backend to aer_simulator for retry.")
-        backend_name = "aer_simulator"
+    logs.append(f"[handle_error] Retrying on requested backend '{backend_name}'.")
 
     # Clear the error and increment retry_count so routing continues normally
     return {

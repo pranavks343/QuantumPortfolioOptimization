@@ -11,8 +11,8 @@ It implements the Variational Quantum Eigensolver (VQE) / QAOA hybrid loop:
   5. Final parameters are used with the MCP Sampler to get the bitstring distribution
 
 Error Handling / Fallback:
-  - If IBM Quantum execution fails, automatically fall back to AerSimulator
-  - Retry logic (up to 3 attempts) before propagating an error
+  - Retries transient execution failures (up to 3 attempts)
+  - Preserves the requested backend instead of silently falling back
 
 Logging:
   - Every COBYLA iteration logs (circuit_depth, shots, current params, energy)
@@ -257,13 +257,7 @@ def run_hybrid_loop(state: AgentState) -> AgentState:
 
             except RuntimeError as exc:
                 logger.warning(f"  Attempt {attempt + 1}/{_MAX_RETRIES} failed: {exc}")
-
-                # If IBM Quantum failed, switch to the local simulator for the retry
-                if active_backend != "aer_simulator":
-                    logger.warning("  Falling back to AerSimulator.")
-                    active_backend = "aer_simulator"
-                elif attempt == _MAX_RETRIES - 1:
-                    # All retries exhausted on the simulator too — re-raise the error
+                if attempt == _MAX_RETRIES - 1:
                     raise
 
         return float("inf")  # Should never reach here, but satisfies the type checker
@@ -344,7 +338,7 @@ def run_hybrid_loop(state: AgentState) -> AgentState:
         "optimal_energy": optimal_energy,          # Lowest energy achieved
         "convergence_history": convergence_history, # Energy at each iteration (for chart)
         "bitstring_counts": bitstring_counts,       # Measurement histogram
-        "backend_name": active_backend,             # May have changed to "aer_simulator"
+        "backend_name": active_backend,
         "logs": logs,
         "error": None,
     }
