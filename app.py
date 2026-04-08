@@ -73,6 +73,7 @@ html, body, [class*="css"] { font-family: 'Inter', sans-serif !important; }
     letter-spacing: -0.03em;
     color: #6d28d9;
     line-height: 1.1;
+    margin-top: 1.75rem;
     margin-bottom: 0.2rem;
 }
 .page-subtitle {
@@ -500,6 +501,9 @@ if run_btn:
         st.error("No LLM API key found — add ANTHROPIC_API_KEY or OPENAI_API_KEY to your .env file.")
         st.stop()
 
+    # Clear any previous result before running
+    st.session_state.pop("_result", None)
+
     with st.spinner("Running the quantum optimization pipeline…"):
         try:
             from agents.graph import build_graph
@@ -509,20 +513,30 @@ if run_btn:
                 "logs": [],
                 "retry_count": 0,
             })
+            # ── Persist result across Streamlit reruns ────────────────────────
+            # Without session_state the result disappears whenever the page
+            # reruns (e.g. user opens an expander, scrolls, etc.)
+            st.session_state["_result"] = result
         except Exception as exc:
             st.error(f"Pipeline error: {exc}")
             st.stop()
 
-    if result.get("error"):
-        st.error(f"Pipeline stopped: {result['error']}")
-        st.stop()
+# ── Render results from session state (survives page reruns) ──────────────────
+if "_result" not in st.session_state:
+    st.stop()
 
-    parsed = result.get("parsed_problem", {})
-    if parsed.get("clarification_needed"):
-        st.warning(f"Clarification needed — {parsed.get('clarification_question')}")
-        st.stop()
+result = st.session_state["_result"]
 
-    st.success("Optimization complete")
+if result.get("error"):
+    st.error(f"Pipeline stopped: {result['error']}")
+    st.stop()
+
+parsed = result.get("parsed_problem", {})
+if parsed.get("clarification_needed"):
+    st.warning(f"Clarification needed — {parsed.get('clarification_question')}")
+    st.stop()
+
+st.success("Optimization complete")
 
     # ── Section 1: Parsed Problem ─────────────────────────────────────────────
     section("01  ·  Parsed Problem")

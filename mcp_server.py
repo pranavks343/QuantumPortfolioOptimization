@@ -111,6 +111,33 @@ def _resolve_backend(backend_name: str):
     return _get_ibm_backend(backend_name), "ibm"
 
 
+def _extract_counts(pub_result) -> dict[str, int]:
+    """
+    Robustly extract a {bitstring: count} dict from a SamplerV2 pub result.
+
+    After transpilation the classical register might be named 'meas', 'c', 'c0',
+    or something else depending on the Qiskit version and circuit structure.
+    This helper tries common names and then falls back to scanning all attributes.
+    """
+    data = pub_result.data
+    # Try the most common classical-register names first
+    for reg_name in ("meas", "c", "c0", "cr", "m"):
+        bit_array = getattr(data, reg_name, None)
+        if bit_array is not None and hasattr(bit_array, "get_counts"):
+            return {k: int(v) for k, v in bit_array.get_counts().items()}
+    # Fallback: scan every attribute on DataBin for one that has get_counts()
+    for attr_name in dir(data):
+        if attr_name.startswith("_"):
+            continue
+        attr = getattr(data, attr_name, None)
+        if attr is not None and hasattr(attr, "get_counts"):
+            return {k: int(v) for k, v in attr.get_counts().items()}
+    raise RuntimeError(
+        f"Could not find a measurement register in SamplerV2 result. "
+        f"Available data fields: {dir(data)}"
+    )
+
+
 def _load_circuit(circuit_qasm: str):
     """
     Parse an OpenQASM 3 text string into a Qiskit QuantumCircuit object.
@@ -259,10 +286,7 @@ async def _run_qaoa_sampler(
             sampler = AerSampler()
             job = sampler.run([bound], shots=shots)
             result = job.result()
-            # .data.meas gives access to the measurement register
-            # .get_counts() returns {"101": 312, "110": 289, ...}
-            counts_raw = result[0].data.meas.get_counts()
-            counts = {k: int(v) for k, v in counts_raw.items()}
+            counts = _extract_counts(result[0])
         else:
             # IBM hardware requires the circuit to be transpiled into its native
             # gate set (cx, rz, sx, x) before submission. Generic gates like 'u'
@@ -274,8 +298,7 @@ async def _run_qaoa_sampler(
             sampler = SamplerV2(mode=backend)
             job = sampler.run([transpiled], shots=shots)
             result = job.result()
-            counts_raw = result[0].data.meas.get_counts()
-            counts = {k: int(v) for k, v in counts_raw.items()}
+            counts = _extract_counts(result[0])
 
         # Return results as a JSON string wrapped in TextContent (MCP format)
         return [TextContent(type="text", text=json.dumps({
