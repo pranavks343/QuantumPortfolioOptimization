@@ -264,12 +264,15 @@ async def _run_qaoa_sampler(
             counts_raw = result[0].data.meas.get_counts()
             counts = {k: int(v) for k, v in counts_raw.items()}
         else:
-            # Run on IBM Quantum hardware using job mode (no Session required).
-            # Session is a paid feature — the Open Plan only supports individual jobs.
-            # IBM runtime primitives take mode= (a backend, session, or batch).
+            # IBM hardware requires the circuit to be transpiled into its native
+            # gate set (cx, rz, sx, x) before submission. Generic gates like 'u'
+            # have not been accepted since March 2024.
             from qiskit_ibm_runtime import SamplerV2
+            from qiskit.transpiler.preset_passmanagers import generate_preset_pass_manager
+            pm = generate_preset_pass_manager(optimization_level=1, backend=backend)
+            transpiled = pm.run(bound)
             sampler = SamplerV2(mode=backend)
-            job = sampler.run([bound], shots=shots)
+            job = sampler.run([transpiled], shots=shots)
             result = job.result()
             counts_raw = result[0].data.meas.get_counts()
             counts = {k: int(v) for k, v in counts_raw.items()}
@@ -324,11 +327,16 @@ async def _run_estimator(
             # .evs = expectation values (a single float for one observable)
             ev = float(result[0].data.evs)
         else:
-            # Use job mode — no Session required on the IBM Open Plan.
-            # IBM runtime primitives take mode= (a backend, session, or batch).
+            # IBM hardware requires native-gate transpilation before submission.
+            # After transpilation the qubit layout changes, so we must remap the
+            # observable via apply_layout() so it still matches the right qubits.
             from qiskit_ibm_runtime import EstimatorV2
+            from qiskit.transpiler.preset_passmanagers import generate_preset_pass_manager
+            pm = generate_preset_pass_manager(optimization_level=1, backend=backend)
+            transpiled = pm.run(circuit)
+            mapped_observable = observable.apply_layout(transpiled.layout)
             estimator = EstimatorV2(mode=backend)
-            pub = (circuit, observable, params)
+            pub = (transpiled, mapped_observable, params)
             job = estimator.run([pub])
             result = job.result()
             ev = float(result[0].data.evs)
