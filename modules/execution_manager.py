@@ -203,8 +203,13 @@ def run_hybrid_loop(state: AgentState) -> AgentState:
     if not transpilation_feasible:
         return {**state, "error": "[execution_manager] Circuit failed transpilation check.", "logs": logs}
 
-    # Track which backend is actively being used (may switch during the loop)
-    active_backend = backend_name
+    # Running every COBYLA evaluation on a real QPU makes the UI appear stuck
+    # for a very long time because each objective call becomes its own hardware
+    # job. Use the simulator for the iterative optimiser and reserve the chosen
+    # backend for the final sampling pass that feeds the frontend results.
+    requested_backend = backend_name
+    estimator_backend = "aer_simulator" if requested_backend != "aer_simulator" else requested_backend
+    sampler_backend = requested_backend
 
     # Convert the Hamiltonian Python object to a JSON string for MCP transport
     observables_json = _serialise_hamiltonian(ising_hamiltonian)
@@ -219,9 +224,15 @@ def run_hybrid_loop(state: AgentState) -> AgentState:
     convergence_history: list[float] = []
 
     logs.append(
-        f"[execution_manager] Starting COBYLA optimisation on backend='{active_backend}' "
+        f"[execution_manager] Starting COBYLA optimisation on backend='{estimator_backend}' "
         f"with {num_parameters} parameters, max_iter={_COBYLA_MAX_ITER}"
     )
+    if sampler_backend != estimator_backend:
+        logs.append(
+            f"[execution_manager] Requested IBM backend '{sampler_backend}'. "
+            f"Using '{estimator_backend}' for COBYLA objective evaluations and "
+            f"'{sampler_backend}' for the final sampling pass."
+        )
 
     # Detailed per-iteration log (saved to JSON file at the end)
     iteration_logs = []
@@ -231,14 +242,13 @@ def run_hybrid_loop(state: AgentState) -> AgentState:
     # Each call runs the quantum circuit and returns the energy.
     # COBYLA tries to find parameters that minimize this energy.
     def objective(params_array: np.ndarray) -> float:
-        nonlocal active_backend   # Allow this inner function to update the backend variable
         params_list = params_array.tolist()
 
         # Try up to _MAX_RETRIES times in case of transient quantum hardware errors
         for attempt in range(_MAX_RETRIES):
             try:
                 # Run the circuit on the quantum backend and get the energy
-                ev = _call_estimator(circuit_qasm, observables_json, params_list, active_backend)
+                ev = _call_estimator(circuit_qasm, observables_json, params_list, estimator_backend)
 
                 # Record the energy for the convergence plot
                 convergence_history.append(ev)
@@ -246,7 +256,7 @@ def run_hybrid_loop(state: AgentState) -> AgentState:
                     "iteration": len(convergence_history),
                     "params": params_list,
                     "energy": ev,
-                    "backend": active_backend,
+                    "backend": estimator_backend,
                 })
 
                 # Log progress every 10 iterations to avoid flooding the output
@@ -289,9 +299,12 @@ def run_hybrid_loop(state: AgentState) -> AgentState:
     # Now that we have the best parameters, run the circuit 1024 times.
     # This gives us a probability distribution over all possible solutions.
     shots = _DEFAULT_SHOTS
-    logs.append(f"[execution_manager] Sampling optimised circuit with {shots} shots...")
+    logs.append(
+        f"[execution_manager] Sampling optimised circuit with {shots} shots on "
+        f"backend='{sampler_backend}'..."
+    )
     try:
-        bitstring_counts = _call_sampler(circuit_qasm, optimal_params, shots, active_backend)
+        bitstring_counts = _call_sampler(circuit_qasm, optimal_params, shots, sampler_backend)
 
         if bitstring_counts:
             # Log the most frequently observed bitstring
@@ -313,7 +326,9 @@ def run_hybrid_loop(state: AgentState) -> AgentState:
     # ── Save the experiment record to disk ────────────────────────────────────
     experiment_log = {
         "timestamp": datetime.now().isoformat(),
-        "backend": active_backend,
+        "requested_backend": requested_backend,
+        "estimator_backend": estimator_backend,
+        "sampler_backend": sampler_backend,
         "num_qubits": state.get("num_qubits"),
         "circuit_depth": state.get("circuit_depth"),
         "num_parameters": num_parameters,
@@ -334,11 +349,13 @@ def run_hybrid_loop(state: AgentState) -> AgentState:
     return {
         **state,
         "initial_params": initial_params,          # Starting knob values
+        "estimator_backend": estimator_backend,    # Backend used during COBYLA
+        "sampler_backend": sampler_backend,        # Backend used for final sampling
         "optimal_params": optimal_params,          # Best knob values found
         "optimal_energy": optimal_energy,          # Lowest energy achieved
         "convergence_history": convergence_history, # Energy at each iteration (for chart)
         "bitstring_counts": bitstring_counts,       # Measurement histogram
-        "backend_name": active_backend,
+        "backend_name": sampler_backend,
         "logs": logs,
         "error": None,
     }

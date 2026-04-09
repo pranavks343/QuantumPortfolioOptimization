@@ -1,6 +1,6 @@
 """
-Streamlit UI — Agentic Quantum Optimization Copilot
-=====================================================
+Streamlit UI — Quantum Alpha Copilot
+====================================
 Run with:  streamlit run app.py
 """
 
@@ -34,7 +34,7 @@ matplotlib.rcParams.update({
 
 # ── Page config ───────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="Quantum Portfolio Optimizer",
+    page_title="Quantum Alpha Copilot",
     page_icon="⚛️",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -379,7 +379,7 @@ def _ibm_backends() -> list[str]:
 with st.sidebar:
     st.markdown("""
     <div class="sidebar-brand">
-        <div class="sidebar-brand-title">⚛ Quantum Optimizer</div>
+        <div class="sidebar-brand-title">⚛ Quantum Alpha Copilot</div>
         <div class="sidebar-brand-sub">QAOA · LangGraph · MCP</div>
     </div>""", unsafe_allow_html=True)
 
@@ -445,7 +445,7 @@ with st.sidebar:
 
 
 # ── Header ────────────────────────────────────────────────────────────────────
-st.markdown('<div class="page-title">Agentic Quantum Optimization</div>', unsafe_allow_html=True)
+st.markdown('<div class="page-title">Quantum Alpha Copilot</div>', unsafe_allow_html=True)
 st.markdown(
     '<div class="page-subtitle">Describe a combinatorial optimization problem in plain English. '
     'The agent formulates it as QUBO, builds a QAOA circuit, and finds the optimal solution.</div>',
@@ -624,11 +624,24 @@ if result.get("circuit_qasm"):
 # ── Section 4: Hybrid Execution ───────────────────────────────────────────────
 section("04  ·  Hybrid Execution  ·  COBYLA + QAOA")
 conv = result.get("convergence_history", [])
+estimator_backend = result.get("estimator_backend", result.get("backend_name", "—"))
+sampler_backend = result.get("sampler_backend", result.get("backend_name", "—"))
 metric_row([
     {"label": "Optimal Energy ⟨H⟩", "value": f"{result.get('optimal_energy', 0.0):.5f}", "color": "accent"},
-    {"label": "Backend",             "value": result.get("backend_name", "—"),             "color": ""},
+    {"label": "Optimizer Backend",   "value": estimator_backend,                            "color": ""},
+    {"label": "Sampling Backend",    "value": sampler_backend,                              "color": ""},
     {"label": "COBYLA Iterations",   "value": len(conv),                                   "color": ""},
 ])
+
+if estimator_backend != sampler_backend:
+    st.markdown(
+        '<div class="info-box" style="margin-top:.75rem;">'
+        'Objective evaluations are run on the local simulator for fast convergence. '
+        'The final shot-based distribution is sampled on the selected IBM backend so the '
+        'frontend can render hardware results without waiting on hundreds of QPU jobs.'
+        '</div>',
+        unsafe_allow_html=True,
+    )
 
 sol      = result.get("final_solution", {}) or {}
 conv_fig = sol.get("_convergence_fig")

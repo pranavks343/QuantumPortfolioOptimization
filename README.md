@@ -1,4 +1,4 @@
-# Quantum Portfolio Optimization Copilot
+# Quantum Alpha Copilot
 
 An agentic quantum optimization system that translates natural-language portfolio problems into quantum circuits and solves them using QAOA. The pipeline is orchestrated by a LangGraph agent graph, with quantum operations exposed through an MCP (Model Context Protocol) server backed by Qiskit.
 

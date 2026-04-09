@@ -1,5 +1,5 @@
 """
-LangGraph StateGraph — Agentic Quantum Optimization Copilot
+LangGraph StateGraph — Quantum Alpha Copilot
 =============================================================
 Defines the directed graph of agent nodes that orchestrates the full
 quantum optimization pipeline:

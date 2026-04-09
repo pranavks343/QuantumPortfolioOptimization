@@ -23,7 +23,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 logger = logging.getLogger(__name__)
 
-_SUMMARY_SYSTEM_PROMPT = """You are the Agentic Quantum Optimization Copilot.
+_SUMMARY_SYSTEM_PROMPT = """You are the Quantum Alpha Copilot.
 You have just executed a QAOA optimization run on a quantum computer (or simulator).
 Given the optimization results, provide a clear, concise, human-readable summary that:
 1. States what problem was solved

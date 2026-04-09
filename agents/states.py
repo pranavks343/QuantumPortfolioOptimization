@@ -1,5 +1,5 @@
 """
-LangGraph State Schema for the Agentic Quantum Optimization Copilot.
+LangGraph State Schema for the Quantum Alpha Copilot.
 
 The AgentState TypedDict is the single shared state object that flows through
 every node in the LangGraph StateGraph. Each node reads fields it needs and
@@ -144,6 +144,12 @@ class AgentState(TypedDict, total=False):
     # ── MODULE 4 OUTPUT ───────────────────────────────────────────────────────
     # The random starting values for γ and β before optimization begins
     initial_params: list[float]
+
+    # Backend used for the iterative objective evaluations during COBYLA
+    estimator_backend: str
+
+    # Backend used for the final shot-based sampling pass
+    sampler_backend: str
 
     # The best γ and β values found after COBYLA optimization
     optimal_params: list[float]
