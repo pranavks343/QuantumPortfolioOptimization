@@ -19,38 +19,6 @@ Logging:
   - Written to both state['logs'] and a JSON file under logs/
 """
 
-# ──────────────────────────────────────────────────────────────────────────────
-# WHAT IS THIS FILE?
-#
-# This is Step 4 — the heart of QAOA. It runs the hybrid classical-quantum loop:
-#
-#   PHASE 1: OPTIMIZATION
-#   ─────────────────────
-#   We have a quantum circuit with adjustable knobs (γ, β parameters).
-#   We need to find the best knob settings that minimize the energy ⟨H⟩.
-#
-#   The trick: we use a CLASSICAL optimizer (COBYLA) to tune the knobs,
-#   while using a QUANTUM circuit to evaluate the energy for each setting.
-#
-#   Round 1:  COBYLA proposes γ=0.3, β=1.2
-#             → send to MCP server → run quantum circuit → get energy = -2.1
-#   Round 2:  COBYLA proposes γ=0.4, β=1.1
-#             → send to MCP server → run quantum circuit → get energy = -2.4 ✓
-#   ... repeat up to 200 times until energy stops improving ...
-#
-#   PHASE 2: SAMPLING
-#   ─────────────────
-#   Once we have the best knob settings, we run the circuit 1024 times.
-#   Each run collapses to a binary string (e.g. "10110").
-#   We count how often each string appears → the probability distribution.
-#   The most frequent string = most likely best solution.
-#
-# HOW ARE QUANTUM CALLS MADE?
-#   Via MCP (Model Context Protocol) — we call tools on mcp_server.py,
-#   which runs the actual Qiskit code and returns results as JSON.
-#   This keeps the quantum execution isolated in the MCP server process.
-# ──────────────────────────────────────────────────────────────────────────────
-
 from __future__ import annotations
 
 import json
@@ -79,7 +47,6 @@ _DEFAULT_SHOTS = 1024
 # More iterations → closer to optimal, but takes more time.
 _COBYLA_MAX_ITER = 200
 
-# Where to save the JSON experiment log files
 _LOG_DIR = Path(os.getenv("LOG_DIR", "logs"))
 
 
@@ -117,16 +84,16 @@ def _call_estimator(
     from tools.mcp_client import _call_mcp_tool
 
     result = _call_mcp_tool("run_estimator", {
-        "circuit_qasm": circuit_qasm,          # The circuit as text
-        "observables": observables_json,        # The Hamiltonian as JSON text
-        "params": list(params),                 # Current γ, β values to try
-        "backend_name": backend_name,           # Which quantum backend to use
+        "circuit_qasm": circuit_qasm,
+        "observables": observables_json,
+        "params": list(params),
+        "backend_name": backend_name,
     })
 
     if "error" in result:
         raise RuntimeError(f"Estimator MCP error: {result['error']}")
 
-    return float(result["expectation_value"])   # The energy ⟨H⟩
+    return float(result["expectation_value"])
 
 
 def _call_sampler(
@@ -148,8 +115,8 @@ def _call_sampler(
 
     result = _call_mcp_tool("run_qaoa_sampler", {
         "circuit_qasm": circuit_qasm,
-        "params": list(params),     # The optimized parameters
-        "shots": shots,             # How many times to measure (1024)
+        "params": list(params),
+        "shots": shots,
         "backend_name": backend_name,
     })
 
@@ -184,7 +151,6 @@ def run_hybrid_loop(state: AgentState) -> AgentState:
              state['optimal_energy'], state['convergence_history'],
              state['bitstring_counts'], state['logs']
     """
-    # Pull everything we need from the shared state
     circuit_qasm: str = state.get("circuit_qasm", "")
     ising_hamiltonian = state.get("ising_hamiltonian")
     num_parameters: int = state.get("num_parameters", 2)
@@ -193,7 +159,6 @@ def run_hybrid_loop(state: AgentState) -> AgentState:
     logs: list[str] = list(state.get("logs", []))
     retry_count: int = state.get("retry_count", 0)
 
-    # Safety checks before we start the expensive optimization loop
     if not circuit_qasm:
         return {**state, "error": "[execution_manager] No circuit QASM in state.", "logs": logs}
 
@@ -215,12 +180,9 @@ def run_hybrid_loop(state: AgentState) -> AgentState:
     observables_json = _serialise_hamiltonian(ising_hamiltonian)
 
     # ── Initialize random starting parameters ─────────────────────────────────
-    # We use a fixed seed (42) so the starting point is reproducible.
-    # Parameters are in the range [0, π] which covers a full rotation.
     rng = np.random.default_rng(seed=42)
     initial_params = rng.uniform(0, np.pi, size=num_parameters).tolist()
 
-    # This list will grow with one entry per COBYLA iteration
     convergence_history: list[float] = []
 
     logs.append(
@@ -234,23 +196,17 @@ def run_hybrid_loop(state: AgentState) -> AgentState:
             f"'{sampler_backend}' for the final sampling pass."
         )
 
-    # Detailed per-iteration log (saved to JSON file at the end)
     iteration_logs = []
 
     # ── Define the objective function for COBYLA ──────────────────────────────
-    # COBYLA repeatedly calls this function with different parameter values.
-    # Each call runs the quantum circuit and returns the energy.
-    # COBYLA tries to find parameters that minimize this energy.
     def objective(params_array: np.ndarray) -> float:
         params_list = params_array.tolist()
 
         # Try up to _MAX_RETRIES times in case of transient quantum hardware errors
         for attempt in range(_MAX_RETRIES):
             try:
-                # Run the circuit on the quantum backend and get the energy
                 ev = _call_estimator(circuit_qasm, observables_json, params_list, estimator_backend)
 
-                # Record the energy for the convergence plot
                 convergence_history.append(ev)
                 iteration_logs.append({
                     "iteration": len(convergence_history),
@@ -263,7 +219,7 @@ def run_hybrid_loop(state: AgentState) -> AgentState:
                 if len(convergence_history) % 10 == 0:
                     logger.info(f"  Iteration {len(convergence_history)}: energy={ev:.6f}")
 
-                return ev  # Return the energy to COBYLA
+                return ev
 
             except RuntimeError as exc:
                 logger.warning(f"  Attempt {attempt + 1}/{_MAX_RETRIES} failed: {exc}")
@@ -273,19 +229,15 @@ def run_hybrid_loop(state: AgentState) -> AgentState:
         return float("inf")  # Should never reach here, but satisfies the type checker
 
     # ── Run COBYLA optimization ───────────────────────────────────────────────
-    # scipy.optimize.minimize with method="COBYLA":
-    #   - x0 = starting parameter values
-    #   - rhobeg = initial step size for exploring parameter space
-    #   - maxiter = stop after this many function evaluations
     try:
         opt_result = minimize(
-            objective,                           # The function to minimize
-            x0=np.array(initial_params),         # Starting parameter values
+            objective,
+            x0=np.array(initial_params),
             method="COBYLA",
             options={"maxiter": _COBYLA_MAX_ITER, "rhobeg": 0.5},
         )
-        optimal_params = opt_result.x.tolist()   # Best parameters found
-        optimal_energy = float(opt_result.fun)    # Best (lowest) energy achieved
+        optimal_params = opt_result.x.tolist()
+        optimal_energy = float(opt_result.fun)
         logs.append(
             f"[execution_manager] COBYLA converged in {len(convergence_history)} iterations. "
             f"Optimal energy={optimal_energy:.6f}"
@@ -296,8 +248,6 @@ def run_hybrid_loop(state: AgentState) -> AgentState:
         return {**state, "error": msg, "logs": logs}
 
     # ── Sample the optimized circuit ──────────────────────────────────────────
-    # Now that we have the best parameters, run the circuit 1024 times.
-    # This gives us a probability distribution over all possible solutions.
     shots = _DEFAULT_SHOTS
     logs.append(
         f"[execution_manager] Sampling optimised circuit with {shots} shots on "
@@ -307,14 +257,12 @@ def run_hybrid_loop(state: AgentState) -> AgentState:
         bitstring_counts = _call_sampler(circuit_qasm, optimal_params, shots, sampler_backend)
 
         if bitstring_counts:
-            # Log the most frequently observed bitstring
             best_bitstring = max(bitstring_counts, key=bitstring_counts.get)
             logs.append(
                 f"[execution_manager] Sampling complete. "
                 f"Top outcome: {best_bitstring}"
             )
         else:
-            # Empty counts means something went wrong with the measurement
             logs.append("[execution_manager] Sampling returned empty counts.")
             return {**state, "error": "[execution_manager] Sampling returned no measurements.", "logs": logs}
 
@@ -345,16 +293,15 @@ def run_hybrid_loop(state: AgentState) -> AgentState:
         # Don't fail the whole pipeline just because saving the log failed
         logger.warning(f"Could not save experiment log: {exc}")
 
-    # Return all results in the updated state
     return {
         **state,
-        "initial_params": initial_params,          # Starting knob values
-        "estimator_backend": estimator_backend,    # Backend used during COBYLA
-        "sampler_backend": sampler_backend,        # Backend used for final sampling
-        "optimal_params": optimal_params,          # Best knob values found
-        "optimal_energy": optimal_energy,          # Lowest energy achieved
-        "convergence_history": convergence_history, # Energy at each iteration (for chart)
-        "bitstring_counts": bitstring_counts,       # Measurement histogram
+        "initial_params": initial_params,
+        "estimator_backend": estimator_backend,
+        "sampler_backend": sampler_backend,
+        "optimal_params": optimal_params,
+        "optimal_energy": optimal_energy,
+        "convergence_history": convergence_history,
+        "bitstring_counts": bitstring_counts,
         "backend_name": sampler_backend,
         "logs": logs,
         "error": None,

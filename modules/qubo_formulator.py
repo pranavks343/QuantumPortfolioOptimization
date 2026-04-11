@@ -17,37 +17,6 @@ Key concepts:
   Ising: minimise <ψ|H|ψ>  where H is a sum of Pauli-Z products
 """
 
-# ──────────────────────────────────────────────────────────────────────────────
-# WHAT IS THIS FILE?
-#
-# This is Step 2 of the pipeline. It takes the structured problem from Step 1
-# and converts it into the mathematical language quantum computers understand.
-#
-# Conversion chain:
-#   ParsedProblem (Python dict)
-#       ↓
-#   QuadraticProgram  ← like writing equations with variables and constraints
-#       ↓
-#   QUBO matrix       ← the problem as a grid of numbers (x^T * Q * x)
-#       ↓
-#   Ising Hamiltonian ← quantum operators that the QAOA circuit minimizes
-#
-# WHY QUBO?
-#   Quantum computers can't directly solve "pick the best 3 stocks."
-#   We rewrite it as: minimize x^T * Q * x, where x is a 0/1 vector.
-#
-# WHY ISING?
-#   QAOA circuits are built to minimize Ising Hamiltonians (sums of Pauli-Z).
-#   QUBO → Ising is a standard mathematical substitution.
-#
-# HOW ARE CONSTRAINTS HANDLED?
-#   Constraints like "select exactly 3" become PENALTY TERMS in the objective.
-#   Violating the constraint adds a large energy cost, so the optimizer avoids it.
-#
-#   "Select exactly 3 from 5 assets" becomes:
-#       penalty * (x1 + x2 + x3 + x4 + x5 - 3)^2
-#   This equals 0 when exactly 3 are selected, and is positive otherwise.
-# ──────────────────────────────────────────────────────────────────────────────
 
 from __future__ import annotations
 
@@ -83,7 +52,6 @@ def _build_quadratic_program(problem: ParsedProblem):
     if not assets:
         raise ValueError("No assets (decision variables) found in parsed problem.")
 
-    # Create an empty optimization model
     qp = QuadraticProgram(name="PortfolioOptimization")
 
     # Add one binary decision variable per asset: 0 = not selected, 1 = selected
@@ -104,9 +72,9 @@ def _build_quadratic_program(problem: ParsedProblem):
     # "Select exactly k" → AAPL + GOOGL + MSFT + AMZN + TSLA = k
     if num_select > 0:
         qp.linear_constraint(
-            linear={a: 1 for a in assets},  # All assets contribute weight 1
-            sense="==",                      # Must equal exactly
-            rhs=num_select,                  # The required count k
+            linear={a: 1 for a in assets},
+            sense="==",
+            rhs=num_select,
             name="cardinality",
         )
 
@@ -124,8 +92,8 @@ def _build_quadratic_program(problem: ParsedProblem):
             limit: float = constraint.get("limit", 0)
             qp.linear_constraint(
                 linear={a: weights_map.get(a, 1.0) for a in assets},
-                sense="<=",       # Less-than-or-equal (budget cap)
-                rhs=limit,        # The budget limit
+                sense="<=",
+                rhs=limit,
                 name=f"budget_{i}",
             )
 
@@ -169,7 +137,6 @@ def build_qubo(state: AgentState) -> AgentState:
     parsed_problem: ParsedProblem = state.get("parsed_problem", {})
     logs: list[str] = list(state.get("logs", []))
 
-    # Safety check: if Step 1 flagged clarification is needed, don't proceed
     if parsed_problem.get("clarification_needed"):
         return {
             **state,
@@ -194,7 +161,7 @@ def build_qubo(state: AgentState) -> AgentState:
         # Note: the converter may have added slack variables, so the matrix
         # may be larger than the number of original assets.
         n = qubo.get_num_vars()
-        Q = np.zeros((n, n))  # Start with all zeros
+        Q = np.zeros((n, n))
 
         # Fill quadratic (off-diagonal) terms — these represent interactions
         # use_name=False → keys are integer indices (0, 1, 2...) not variable names
@@ -216,14 +183,13 @@ def build_qubo(state: AgentState) -> AgentState:
             f"{len(ising_op)} Pauli terms, offset={offset:.4f}"
         )
 
-        # Return the updated state with all quantum math fields filled in
         return {
             **state,
-            "qubo_matrix": Q.tolist(),           # 2D list for the heatmap chart
-            "qubo_offset": float(qubo_offset),   # Constant from QUBO formulation
-            "ising_hamiltonian": ising_op,        # The quantum operator object
-            "ising_offset": float(offset),        # Constant from Ising conversion
-            "num_qubits": ising_op.num_qubits,    # Used in Step 3 for circuit building
+            "qubo_matrix": Q.tolist(),
+            "qubo_offset": float(qubo_offset),
+            "ising_hamiltonian": ising_op,
+            "ising_offset": float(offset),
+            "num_qubits": ising_op.num_qubits,
             "logs": logs,
             "error": None,
         }

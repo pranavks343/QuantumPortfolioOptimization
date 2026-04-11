@@ -8,30 +8,6 @@ Each tool launches the MCP server as a subprocess (stdio transport) and
 communicates with it via the MCP Python client.
 """
 
-# ──────────────────────────────────────────────────────────────────────────────
-# WHAT IS THIS FILE?
-#
-# This file is the BRIDGE between the main pipeline (execution_manager.py)
-# and the MCP server (mcp_server.py).
-#
-# It has two parts:
-#
-# PART 1: _call_mcp_tool() — the raw communication function
-#   This function:
-#   1. Launches mcp_server.py as a child subprocess
-#   2. Sends it a JSON-RPC message over stdin: "call tool X with args Y"
-#   3. Reads the JSON response from stdout
-#   4. Returns the parsed result as a Python dict
-#
-# PART 2: LangChain Tool classes (QAOASamplerTool, EstimatorTool, etc.)
-#   These wrap _call_mcp_tool() in LangChain's BaseTool format.
-#   This lets the LangGraph orchestrator discover and call them as
-#   standard "agent tools" if it ever needs to use them directly.
-#
-# In practice, execution_manager.py calls _call_mcp_tool() directly
-# (bypassing the LangChain wrapper) for simplicity.
-# ──────────────────────────────────────────────────────────────────────────────
-
 from __future__ import annotations
 
 import json
@@ -46,8 +22,6 @@ from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
-# Absolute path to the MCP server script so we can launch it as a subprocess
-# __file__ = this file (mcp_client.py), .parent.parent = project root
 _SERVER_PATH = Path(__file__).parent.parent / "mcp_server.py"
 
 
@@ -73,24 +47,18 @@ def _call_mcp_tool(tool_name: str, arguments: dict) -> dict:
         from mcp import ClientSession, StdioServerParameters
         from mcp.client.stdio import stdio_client
 
-        # Tell MCP how to start the server: run "python mcp_server.py"
         server_params = StdioServerParameters(
-            command=sys.executable,     # The current Python interpreter
-            args=[str(_SERVER_PATH)],   # Path to mcp_server.py
+            command=sys.executable,
+            args=[str(_SERVER_PATH)],
         )
 
         async def _run():
-            """The actual async communication logic."""
             async with stdio_client(server_params) as (read, write):
-                # Establish an MCP session over the stdin/stdout pipes
                 async with ClientSession(read, write) as session:
-                    await session.initialize()   # MCP handshake
-
-                    # Call the tool and wait for the response
+                    await session.initialize()
                     result = await session.call_tool(tool_name, arguments)
-
-                    # result.content is a list of TextContent objects
-                    # We take the first one and parse its JSON text
+                    # result.content is a list of TextContent objects;
+                    # take the first one and parse its JSON text
                     if result.content:
                         return json.loads(result.content[0].text)
                     return {}
@@ -99,7 +67,7 @@ def _call_mcp_tool(tool_name: str, arguments: dict) -> dict:
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
-            loop = None   # No running loop — we can safely call asyncio.run()
+            loop = None
 
         if loop and loop.is_running():
             # We're inside Streamlit or another async framework.
@@ -114,7 +82,7 @@ def _call_mcp_tool(tool_name: str, arguments: dict) -> dict:
 
     except Exception as exc:
         logger.error(f"MCP tool call '{tool_name}' failed: {exc}")
-        return {"error": str(exc)}   # Return error dict instead of raising
+        return {"error": str(exc)}
 
 
 # ---------------------------------------------------------------------------
