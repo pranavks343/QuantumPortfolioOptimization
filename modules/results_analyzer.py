@@ -13,34 +13,6 @@ Responsibilities:
       2. COBYLA convergence curve (energy vs. iteration)
 """
 
-# ──────────────────────────────────────────────────────────────────────────────
-# WHAT IS THIS FILE?
-#
-# This is Step 5 — the final step. It takes the raw measurement histogram from
-# Step 4 and turns it into a human-readable answer.
-#
-# INPUT:  bitstring_counts = {"10110": 312, "01101": 289, "11010": 198, ...}
-#         (each key is a binary string, each value is how many times it appeared)
-#
-# WHAT IS A BITSTRING?
-#   Each qubit measured = one bit (0 or 1).
-#   For a 5-qubit circuit, each measurement gives a 5-bit string like "10110".
-#   Each bit position corresponds to one asset.
-#   Bit = 1 → that asset was selected.
-#   Bit = 0 → that asset was not selected.
-#
-#   Example: "10110" with assets [AAPL, GOOGL, MSFT, AMZN, TSLA]
-#   Qiskit convention: rightmost bit = first qubit (q0 = AAPL)
-#   Reading right-to-left: AAPL=0, GOOGL=1, MSFT=1, AMZN=0, TSLA=1
-#   → Selected: GOOGL, MSFT, TSLA
-#
-# STEPS:
-#   1. Decode every bitstring → list of selected asset names
-#   2. Check each selection against the problem constraints
-#   3. Pick the best feasible solution (highest objective value)
-#   4. Compare to classical brute-force to compute approximation ratio
-#   5. Generate charts for the UI
-# ──────────────────────────────────────────────────────────────────────────────
 
 from __future__ import annotations
 
@@ -60,13 +32,6 @@ logger = logging.getLogger(__name__)
 # ──────────────────────────────────────────────────────────────────────────────
 # CLASSICAL BRUTE-FORCE (for small problems only, n ≤ 20 assets)
 # ──────────────────────────────────────────────────────────────────────────────
-# We try EVERY possible combination of assets (all 2^n possibilities) and find
-# the best one. This gives us the "true" optimal to compare against.
-#
-# Why? To compute the approximation ratio:
-#   approximation_ratio = quantum_result / classical_best
-# A ratio of 1.0 means quantum matched the best possible answer.
-# ──────────────────────────────────────────────────────────────────────────────
 
 def _brute_force_optimum(problem: ParsedProblem) -> tuple[float, list[str]]:
     """
@@ -84,21 +49,17 @@ def _brute_force_optimum(problem: ParsedProblem) -> tuple[float, list[str]]:
     if n > 20:
         return float("-inf") if objective == "maximize" else float("inf"), []
 
-    # Start with the worst possible value
     best_val = float("-inf") if objective == "maximize" else float("inf")
     best_selection: list[str] = []
 
     # Iterate over all 2^n binary patterns using bit manipulation
     # mask=0b00101 means assets at position 0 and 2 are selected
     for mask in range(1 << n):
-        # Convert the bit mask to a list of selected asset names
         selection = [assets[i] for i in range(n) if (mask >> i) & 1]
 
-        # Skip this combination if it doesn't select exactly k assets
         if num_select > 0 and len(selection) != num_select:
             continue
 
-        # Check all other hard constraints (budget, etc.)
         satisfied = True
         for constraint in hard_constraints:
             ctype = constraint.get("type", "")
@@ -111,12 +72,10 @@ def _brute_force_optimum(problem: ParsedProblem) -> tuple[float, list[str]]:
                     break
 
         if not satisfied:
-            continue  # This combination violates a constraint, skip it
+            continue
 
-        # Compute the objective value for this combination
         obj_val = sum(weights.get(a, 1.0) for a in selection)
 
-        # Track the best valid combination found so far
         if objective == "maximize" and obj_val > best_val:
             best_val = obj_val
             best_selection = selection
@@ -142,11 +101,9 @@ def _check_constraints(selection: list[str], problem: ParsedProblem) -> bool:
     num_select = problem.get("num_select", 0)
     hard_constraints = problem.get("hard_constraints", [])
 
-    # Check cardinality: must select exactly num_select assets
     if num_select > 0 and len(selection) != num_select:
         return False
 
-    # Check all other hard constraints
     for constraint in hard_constraints:
         ctype = constraint.get("type", "")
         if ctype == "budget":
@@ -156,7 +113,7 @@ def _check_constraints(selection: list[str], problem: ParsedProblem) -> bool:
             if total_cost > limit:
                 return False
 
-    return True  # All constraints satisfied
+    return True
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -202,12 +159,11 @@ def _plot_histogram(counts: dict[str, int], top_n: int = 10) -> plt.Figure:
         ax.set_title("No measurement data available")
         return fig
 
-    # Sort by count (descending) and take only the top_n
     sorted_counts = sorted(counts.items(), key=lambda x: x[1], reverse=True)[:top_n]
     labels = [item[0] for item in sorted_counts]
     values = [item[1] for item in sorted_counts]
     total = sum(counts.values())
-    probabilities = [v / total for v in values]   # Convert raw counts to fractions
+    probabilities = [v / total for v in values]
 
     fig, ax = plt.subplots(figsize=(10, 4))
     bars = ax.bar(labels, probabilities, color="#4C72B0", edgecolor="white")
@@ -217,7 +173,6 @@ def _plot_histogram(counts: dict[str, int], top_n: int = 10) -> plt.Figure:
     ax.set_ylim(0, max(probabilities) * 1.2 if probabilities else 1.0)
     plt.xticks(rotation=45, ha="right")
 
-    # Add the probability value as text above each bar
     for bar, prob in zip(bars, probabilities):
         ax.text(
             bar.get_x() + bar.get_width() / 2,
@@ -276,7 +231,6 @@ def analyze(state: AgentState) -> AgentState:
     optimal_energy: float = state.get("optimal_energy", 0.0)
     logs: list[str] = list(state.get("logs", []))
 
-    # Safety check: we can't analyze anything without measurement data
     if not bitstring_counts:
         return {**state, "error": "[results_analyzer] No bitstring counts found.", "logs": logs}
 
@@ -285,30 +239,23 @@ def analyze(state: AgentState) -> AgentState:
     objective_dir = parsed_problem.get("objective", "maximize")
 
     # ── Step 1: Decode every bitstring into asset names ───────────────────────
-    total_shots = sum(bitstring_counts.values())  # Should equal 1024
+    total_shots = sum(bitstring_counts.values())
     candidates = []
 
-    # Process bitstrings from most-frequent to least-frequent
     for bitstring, count in sorted(bitstring_counts.items(), key=lambda x: x[1], reverse=True):
-        # Convert "10110" → ["GOOGL", "MSFT", "TSLA"] (or whatever assets are selected)
         selection = _decode_bitstring(bitstring, assets)
-
-        # Compute the total objective value for this selection
         obj_val = sum(objective_weights.get(a, 1.0) for a in selection)
-
-        # Check if this selection follows all the hard rules
         satisfied = _check_constraints(selection, parsed_problem)
 
         candidates.append({
             "bitstring": bitstring,
             "selection": selection,
-            "probability": count / total_shots,  # e.g. 312/1024 ≈ 0.305
+            "probability": count / total_shots,
             "objective_value": obj_val,
             "constraint_satisfied": satisfied,
         })
 
     # ── Step 2: Pick the best feasible solution ───────────────────────────────
-    # "Feasible" means it satisfies all hard constraints
     feasible = [c for c in candidates if c["constraint_satisfied"]]
 
     if not feasible:
@@ -316,7 +263,6 @@ def analyze(state: AgentState) -> AgentState:
         best_candidate = candidates[0]
         logs.append("[results_analyzer] WARNING: No constraint-satisfying solution found.")
     else:
-        # Among feasible solutions, pick the one with the best objective value
         if objective_dir == "maximize":
             best_candidate = max(feasible, key=lambda c: c["objective_value"])
         else:
@@ -327,7 +273,6 @@ def analyze(state: AgentState) -> AgentState:
     constraint_satisfied = best_candidate["constraint_satisfied"]
 
     # ── Step 3: Compute the approximation ratio ───────────────────────────────
-    # Run a classical brute-force to find the true optimal answer
     classical_optimum, classical_selection = _brute_force_optimum(parsed_problem)
 
     # approximation_ratio = quantum_result / classical_best
@@ -350,16 +295,16 @@ def analyze(state: AgentState) -> AgentState:
 
     # ── Step 4: Build the final result dictionary ─────────────────────────────
     final_solution = {
-        "selected_assets": best_selection,                 # e.g. ["AAPL", "AMZN", "GOOGL"]
-        "objective_value": best_obj_val,                   # e.g. 2.45
-        "objective_direction": objective_dir,              # "maximize" or "minimize"
-        "constraint_satisfied": constraint_satisfied,      # True/False
-        "approximation_ratio": approximation_ratio,        # e.g. 0.98
-        "classical_optimum_selection": classical_selection, # e.g. ["AAPL", "AMZN", "MSFT"]
+        "selected_assets": best_selection,
+        "objective_value": best_obj_val,
+        "objective_direction": objective_dir,
+        "constraint_satisfied": constraint_satisfied,
+        "approximation_ratio": approximation_ratio,
+        "classical_optimum_selection": classical_selection,
         "classical_optimum_value": classical_optimum if isinstance(classical_optimum, float) else None,
-        "optimal_energy": optimal_energy,                  # Final COBYLA energy value
-        "top_candidates": candidates[:5],                  # Top 5 measurement outcomes
-        "total_shots": total_shots,                        # Always 1024
+        "optimal_energy": optimal_energy,
+        "top_candidates": candidates[:5],
+        "total_shots": total_shots,
     }
 
     # ── Step 5: Generate the visualization charts ─────────────────────────────
@@ -369,8 +314,8 @@ def analyze(state: AgentState) -> AgentState:
     try:
         hist_fig = _plot_histogram(bitstring_counts)
         conv_fig = _plot_convergence(convergence_history) if convergence_history else None
-        final_solution["_histogram_fig"] = hist_fig    # Measurement bar chart
-        final_solution["_convergence_fig"] = conv_fig  # Convergence line chart
+        final_solution["_histogram_fig"] = hist_fig
+        final_solution["_convergence_fig"] = conv_fig
     except Exception as exc:
         logger.warning(f"[results_analyzer] Visualisation error: {exc}")
 

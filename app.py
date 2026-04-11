@@ -513,9 +513,7 @@ if run_btn:
                 "logs": [],
                 "retry_count": 0,
             })
-            # ── Persist result across Streamlit reruns ────────────────────────
-            # Without session_state the result disappears whenever the page
-            # reruns (e.g. user opens an expander, scrolls, etc.)
+            # Persist result in session_state so it survives Streamlit reruns
             st.session_state["_result"] = result
         except Exception as exc:
             st.error(f"Pipeline error: {exc}")

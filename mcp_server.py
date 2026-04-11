@@ -16,37 +16,6 @@ Run with:
 The server speaks stdio-based MCP by default (suitable for subprocess transport).
 """
 
-# ──────────────────────────────────────────────────────────────────────────────
-# WHAT IS THIS FILE?
-#
-# This file is a standalone server that exposes 4 quantum tools over the
-# MCP (Model Context Protocol). It runs as a SUBPROCESS — meaning the main app
-# launches it in the background and communicates with it via stdin/stdout pipes.
-#
-# WHY A SEPARATE SERVER?
-#   - Keeps quantum execution isolated from the main Python process
-#   - MCP is a standard protocol, so other AI tools can also call these tools
-#   - The subprocess can be restarted independently if it crashes
-#
-# HOW DOES COMMUNICATION WORK?
-#   main app (execution_manager.py)
-#       ↓  calls _call_mcp_tool("run_estimator", {...})
-#   mcp_client.py
-#       ↓  launches this script as a subprocess
-#       ↓  sends JSON-RPC message over stdin pipe
-#   mcp_server.py  ← THIS FILE
-#       ↓  receives the message, runs Qiskit code
-#       ↓  sends JSON result back over stdout pipe
-#   mcp_client.py
-#       ↓  returns the parsed result to execution_manager.py
-#
-# THE 4 TOOLS:
-#   1. run_qaoa_sampler  — measure the circuit many times → bitstring histogram
-#   2. run_estimator     — compute ⟨H⟩ (energy) for one parameter setting
-#   3. list_backends     — list available quantum backends
-#   4. validate_circuit  — check if a circuit fits on a given backend
-# ──────────────────────────────────────────────────────────────────────────────
-
 from __future__ import annotations
 
 import asyncio
@@ -64,7 +33,6 @@ load_dotenv()
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
 logger = logging.getLogger(__name__)
 
-# Create the MCP server instance with a name identifier
 app = Server("quantum-copilot")
 
 
@@ -164,10 +132,6 @@ def _bind_params(circuit, params: list[float]):
 # ──────────────────────────────────────────────────────────────────────────────
 # TOOL DEFINITIONS
 # ──────────────────────────────────────────────────────────────────────────────
-# This function is called when the MCP client asks "what tools do you have?"
-# It returns a list of Tool objects that describe each tool's name, purpose,
-# and what inputs it accepts (as JSON Schema).
-# ──────────────────────────────────────────────────────────────────────────────
 
 @app.list_tools()
 async def list_tools() -> list[Tool]:
@@ -233,9 +197,6 @@ async def list_tools() -> list[Tool]:
 # ──────────────────────────────────────────────────────────────────────────────
 # TOOL DISPATCH
 # ──────────────────────────────────────────────────────────────────────────────
-# When the MCP client calls a tool, this function receives the tool name
-# and its arguments, then routes to the appropriate implementation below.
-# ──────────────────────────────────────────────────────────────────────────────
 
 @app.call_tool()
 async def call_tool(name: str, arguments: dict) -> list[TextContent]:
@@ -254,10 +215,6 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
 # ──────────────────────────────────────────────────────────────────────────────
 # TOOL 1: run_qaoa_sampler
 # ──────────────────────────────────────────────────────────────────────────────
-# This is the FINAL measurement step.
-# After COBYLA found the best parameters, we run the circuit many times
-# and count how often each bitstring appears.
-# ──────────────────────────────────────────────────────────────────────────────
 
 async def _run_qaoa_sampler(
     circuit_qasm: str,
@@ -268,21 +225,16 @@ async def _run_qaoa_sampler(
     try:
         from qiskit_aer.primitives import SamplerV2 as AerSampler
 
-        # Parse the OpenQASM text back into a Qiskit circuit object
         circuit = _load_circuit(circuit_qasm)
-
-        # Plug the optimized parameters into the circuit's parameter slots
         bound = _bind_params(circuit, params)
 
         # Add measurement gates at the end if not already present
-        # (We need measurements to get classical output from the quantum circuit)
         if not any(bound.count_ops().get(gate, 0) for gate in ("measure",)):
             bound.measure_all()
 
         backend, kind = _resolve_backend(backend_name)
 
         if kind == "local":
-            # Run on the local AerSimulator (fast, no network required)
             sampler = AerSampler()
             job = sampler.run([bound], shots=shots)
             result = job.result()
@@ -300,10 +252,9 @@ async def _run_qaoa_sampler(
             result = job.result()
             counts = _extract_counts(result[0])
 
-        # Return results as a JSON string wrapped in TextContent (MCP format)
         return [TextContent(type="text", text=json.dumps({
-            "counts": counts,       # The measurement histogram
-            "shots": shots,         # How many measurements were taken
+            "counts": counts,
+            "shots": shots,
             "backend": backend_name,
         }))]
 
@@ -314,9 +265,6 @@ async def _run_qaoa_sampler(
 
 # ──────────────────────────────────────────────────────────────────────────────
 # TOOL 2: run_estimator
-# ──────────────────────────────────────────────────────────────────────────────
-# This is called HUNDREDS of times during the COBYLA optimization loop.
-# Each call evaluates the energy ⟨H⟩ for one specific set of parameters.
 # ──────────────────────────────────────────────────────────────────────────────
 
 async def _run_estimator(
@@ -329,7 +277,6 @@ async def _run_estimator(
         from qiskit.quantum_info import SparsePauliOp
         from qiskit_aer.primitives import EstimatorV2 as AerEstimator
 
-        # Parse the circuit from text
         circuit = _load_circuit(circuit_qasm)
 
         # Reconstruct the Hamiltonian from its JSON representation
@@ -347,8 +294,7 @@ async def _run_estimator(
             pub = (circuit, observable, params)
             job = estimator.run([pub])
             result = job.result()
-            # .evs = expectation values (a single float for one observable)
-            ev = float(result[0].data.evs)
+            ev = float(result[0].data.evs)  # .evs = expectation values
         else:
             # IBM hardware requires native-gate transpilation before submission.
             # After transpilation the qubit layout changes, so we must remap the
@@ -365,7 +311,7 @@ async def _run_estimator(
             ev = float(result[0].data.evs)
 
         return [TextContent(type="text", text=json.dumps({
-            "expectation_value": ev,   # The energy ⟨H⟩ — what COBYLA is minimizing
+            "expectation_value": ev,
             "backend": backend_name,
         }))]
 
@@ -377,20 +323,14 @@ async def _run_estimator(
 # ──────────────────────────────────────────────────────────────────────────────
 # TOOL 3: list_backends
 # ──────────────────────────────────────────────────────────────────────────────
-# Returns a list of available quantum backends.
-# Always includes the local AerSimulator.
-# Adds IBM Quantum machines if IBM_QUANTUM_TOKEN is set in the .env file.
-# ──────────────────────────────────────────────────────────────────────────────
 
 async def _list_backends() -> list[TextContent]:
-    # Start with the local simulator (always available)
     backends_info = [{"name": "aer_simulator", "qubits": 32, "status": "available", "type": "local"}]
 
     try:
         from qiskit_ibm_runtime import QiskitRuntimeService
         token = os.getenv("IBM_QUANTUM_TOKEN")
         if token:
-            # Connect to IBM Quantum and fetch all operational machines
             service = QiskitRuntimeService(
                 channel=_runtime_channel(),
                 token=token,
@@ -403,7 +343,6 @@ async def _list_backends() -> list[TextContent]:
                     "type": "ibm_quantum",
                 })
     except Exception as exc:
-        # If IBM is unreachable, just return the local simulator
         logger.warning(f"Could not fetch IBM Quantum backends: {exc}")
 
     return [TextContent(type="text", text=json.dumps({"backends": backends_info}))]
@@ -411,9 +350,6 @@ async def _list_backends() -> list[TextContent]:
 
 # ──────────────────────────────────────────────────────────────────────────────
 # TOOL 4: validate_circuit
-# ──────────────────────────────────────────────────────────────────────────────
-# Compiles the circuit for the target backend and reports how big it is.
-# Used by circuit_constructor.py to check feasibility before execution.
 # ──────────────────────────────────────────────────────────────────────────────
 
 async def _validate_circuit(
@@ -423,16 +359,14 @@ async def _validate_circuit(
     try:
         from qiskit.transpiler.preset_passmanagers import generate_preset_pass_manager
 
-        # Parse the circuit and compile it for the target backend
         circuit = _load_circuit(circuit_qasm)
         backend, _ = _resolve_backend(backend_name)
         pm = generate_preset_pass_manager(optimization_level=1, backend=backend)
         transpiled = pm.run(circuit)
 
-        # Measure the compiled circuit
-        depth = transpiled.depth()                           # Number of sequential gate layers
-        gate_count = sum(transpiled.count_ops().values())    # Total number of gates
-        num_qubits = transpiled.num_qubits                   # Qubits used
+        depth = transpiled.depth()
+        gate_count = sum(transpiled.count_ops().values())
+        num_qubits = transpiled.num_qubits
         backend_qubits = backend.num_qubits if hasattr(backend, "num_qubits") else 127
 
         # Feasible = fits on the hardware AND is shallow enough to run reliably
@@ -454,12 +388,8 @@ async def _validate_circuit(
 # ──────────────────────────────────────────────────────────────────────────────
 # ENTRY POINT
 # ──────────────────────────────────────────────────────────────────────────────
-# When this script is launched as a subprocess, it starts listening for
-# MCP messages on stdin and sends responses on stdout.
-# ──────────────────────────────────────────────────────────────────────────────
 
 async def main():
-    # stdio_server() sets up the stdin/stdout communication channels
     async with stdio_server() as (read_stream, write_stream):
         await app.run(read_stream, write_stream, app.create_initialization_options())
 

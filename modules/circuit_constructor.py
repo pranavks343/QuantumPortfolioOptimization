@@ -12,34 +12,6 @@ Responsibilities:
     an OpenQASM string for serialisation to the MCP server
 """
 
-# ──────────────────────────────────────────────────────────────────────────────
-# WHAT IS THIS FILE?
-#
-# This is Step 3 of the pipeline. It takes the Ising Hamiltonian from Step 2
-# and turns it into an actual quantum circuit (the QAOAAnsatz).
-#
-# WHAT IS A QAOA CIRCUIT?
-#   QAOA = Quantum Approximate Optimization Algorithm.
-#   It's a circuit with adjustable "knobs" called gamma (γ) and beta (β).
-#   The circuit alternates between two layers:
-#     - Cost layer: encodes the problem (using the Hamiltonian)
-#     - Mixer layer: explores different solutions
-#   Each pair of (cost + mixer) is one "rep". More reps = better solution
-#   but deeper circuit (harder to run on real hardware).
-#
-# WHAT IS TRANSPILATION?
-#   Real quantum hardware can't run arbitrary gates — it only supports a
-#   specific set of native gates (like CX, RZ, SX on IBM machines).
-#   Transpilation = rewriting the circuit using only those native gates,
-#   and mapping logical qubits to physical ones on the chip's topology.
-#   This file runs the transpiler and checks if the result is feasible:
-#     - Does it fit within the qubit count? (n_qubits ≤ backend capacity)
-#     - Is it shallow enough? (depth ≤ 200, beyond which errors dominate)
-#
-# OUTPUT: The circuit is serialized to OpenQASM 3 (text format) so it can
-#   be sent over the MCP protocol to mcp_server.py for execution.
-# ──────────────────────────────────────────────────────────────────────────────
-
 from __future__ import annotations
 
 import logging
@@ -71,11 +43,9 @@ def _get_backend(backend_name: str) -> Any:
     """Return a Qiskit backend object for the given name."""
     from qiskit_aer import AerSimulator
 
-    # If the name is "aer_simulator" (or empty), use the local CPU simulator
     if backend_name in ("aer_simulator", "local", "", None):
         return AerSimulator()
 
-    # Otherwise try to connect to IBM Quantum hardware using the token from .env
     try:
         from qiskit_ibm_runtime import QiskitRuntimeService
 
@@ -135,15 +105,11 @@ def build_qaoa_circuit(state: AgentState) -> AgentState:
     backend_name: str = state.get("backend_name", "aer_simulator")
     logs: list[str] = list(state.get("logs", []))
 
-    # Safety check: we can't build a circuit without a Hamiltonian
     if ising_hamiltonian is None:
         return {**state, "error": "[circuit_constructor] No Ising Hamiltonian in state.", "logs": logs}
 
     try:
         # ── Build the QAOA Ansatz ─────────────────────────────────────────────
-        # QAOAAnsatz takes the Hamiltonian and creates a parameterized circuit.
-        # It has "reps" pairs of (cost layer + mixer layer).
-        # Each rep adds 2 parameters: one gamma (γ) and one beta (β).
         preferred_reps = _choose_reps(num_qubits)
         logs.append(
             f"[circuit_constructor] Building QAOAAnsatz: {num_qubits} qubits, "
@@ -151,10 +117,8 @@ def build_qaoa_circuit(state: AgentState) -> AgentState:
         )
 
         # ── Transpilation Check ───────────────────────────────────────────────
-        # Get the backend object so we know its qubit count and native gate set
         backend = _get_backend(backend_name)
 
-        # How many physical qubits does this backend have?
         backend_num_qubits = (
             backend.num_qubits
             if hasattr(backend, "num_qubits")
@@ -242,10 +206,10 @@ def build_qaoa_circuit(state: AgentState) -> AgentState:
 
         return {
             **state,
-            "circuit_qasm": circuit_qasm,                    # Text representation of the circuit
-            "circuit_depth": chosen_depth,                   # Depth after transpilation
-            "num_parameters": chosen_num_parameters,         # How many knobs COBYLA will tune
-            "transpilation_feasible": True,                  # Pass/fail flag for the UI
+            "circuit_qasm": circuit_qasm,
+            "circuit_depth": chosen_depth,
+            "num_parameters": chosen_num_parameters,
+            "transpilation_feasible": True,
             "logs": logs,
             "error": None,
         }
